@@ -20,9 +20,9 @@ Tool for checking primer coverage and drift.
     cd primer_cheq
     ```
 
-2. Install the required Python packages:
+2. Create the conda environment:
     ```sh
-    pip install -r requirements.txt
+    conda env create -f requirements.yml
     ```
 
 ## Usage

@@ -22,7 +22,7 @@ Tool for checking primer coverage and drift.
 
 2. Create the conda environment:
     ```sh
-    conda env create -f requirements.yml
+    conda env create -f environment.yml
     ```
 
 ## Usage

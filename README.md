@@ -28,6 +28,7 @@ Tool for checking primer coverage and drift.
 ## Usage
 
 ```sh
+conda activate primer_cheq
 python primer_cheq.py -p primer.fasta -o sample_name -w working_dir [options]
 ```
 

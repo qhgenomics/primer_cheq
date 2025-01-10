@@ -19,13 +19,14 @@ def get_primer_sequences(primers):
 
 # downloads viruses into a single file
 def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
-    subprocess.Popoen("{} download virus genome taxon {} --complete-only --filename {}/{}_ncbi_dataset.zip".format(
+    subprocess.Popen("{} download virus genome taxon {} --complete-only --filename {}/{}_ncbi_dataset.zip".format(
         datasets, taxnum, working_dir, prefix
     ), shell=True).wait()
     subprocess.Popen("unzip -o {fworking_dir}/{fprefix}_ncbi_dataset.zip -d {fworking_dir}/{fprefix}_downloads && rm {fworking_dir}/{fprefix}_ncbi_dataset.zip".format(
         fworking_dir=working_dir, fprefix=prefix
     ), shell=True).wait()
-    fasta_file = "{}/{}_downlads/ncbi_dataset/data/genomic.fna".format(working_dir, prefix)
+    fasta_file = "{}/{}_downloads/ncbi_dataset/data/genomic.fna".format(working_dir, prefix)
+    print(fasta_file)
     if not os.path.exists(fasta_file):
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)
@@ -36,7 +37,7 @@ def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
 # downloads bacteria into multiple files and then puts them into a single file with correct names
 # returns a dictionary of names that will
 def download_bac(taxnum, working_dir, prefix, datasets="datasets"):
-    subprocess.Popoen("{} download genome taxon {} --assembly-source RefSeq --filename {}/{}_ncbi_dataset.zip".format(
+    subprocess.Popen("{} download genome taxon {} --assembly-source RefSeq --filename {}/{}_ncbi_dataset.zip".format(
         datasets, taxnum, working_dir, prefix
     ), shell=True).wait()
     subprocess.Popen("unzip -o {fworking_dir}/{fprefix}_ncbi_dataset.zip -d {fworking_dir}/{fprefix}_downloads && rm {fworking_dir}/{fprefix}_ncbi_dataset.zip".format(
@@ -85,6 +86,8 @@ def get_db_fasta(fasta_file, working_dir, prefix):
         for line in f:
             if line.startswith(">"):
                 o.write(line.split()[0] + "|na\n")
+            else:
+                o.write(line)
 
 
 

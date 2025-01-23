@@ -19,14 +19,15 @@ def get_primer_sequences(primers):
 
 # downloads viruses into a single file
 def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
-    subprocess.Popen("{} download virus genome taxon {} --complete-only --filename {}/{}_ncbi_dataset.zip".format(
-        datasets, taxnum, working_dir, prefix
+    datasets_filename = os.path.join(working_dir, prefix + "_ncbi_dataset.zip")
+    subprocess.Popen("{} download virus genome taxon {} --complete-only --filename {}".format(
+        datasets, taxnum,datasets_filename
     ), shell=True).wait()
-    subprocess.Popen("unzip -o {fworking_dir}/{fprefix}_ncbi_dataset.zip -d {fworking_dir}/{fprefix}_downloads && rm {fworking_dir}/{fprefix}_ncbi_dataset.zip".format(
-        fworking_dir=working_dir, fprefix=prefix
+    datasets_unzip_folder = os.path.join(working_dir, prefix + "_downloads")
+    subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
+        f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder
     ), shell=True).wait()
-    fasta_file = "{}/{}_downloads/ncbi_dataset/data/genomic.fna".format(working_dir, prefix)
-    print(fasta_file)
+    fasta_file = os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data" "genomic.fna")
     if not os.path.exists(fasta_file):
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)
@@ -37,13 +38,15 @@ def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
 # downloads bacteria into multiple files and then puts them into a single file with correct names
 # returns a dictionary of names that will
 def download_bac(taxnum, working_dir, prefix, datasets="datasets"):
-    subprocess.Popen("{} download genome taxon {} --assembly-source RefSeq --filename {}/{}_ncbi_dataset.zip".format(
-        datasets, taxnum, working_dir, prefix
+    datasets_filename = os.path.join(working_dir, prefix + "_ncbi_dataset.zip")
+    subprocess.Popen("{} download genome taxon {} --assembly-source RefSeq --filename {}".format(
+        datasets, taxnum, datasets_filename
     ), shell=True).wait()
-    subprocess.Popen("unzip -o {fworking_dir}/{fprefix}_ncbi_dataset.zip -d {fworking_dir}/{fprefix}_downloads && rm {fworking_dir}/{fprefix}_ncbi_dataset.zip".format(
-        fworking_dir=working_dir, fprefix=prefix
+    datasets_unzip_folder = os.path.join(working_dir, prefix + "_downloads")
+    subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
+        f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder
     ), shell=True).wait()
-    fasta_files = glob.glob("{}/{}_downlads/ncbi_dataset/data/*/*.fna".format(working_dir, prefix))
+    fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset", "*", "*.fna")
     if len(fasta_files) < 1:
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)
@@ -105,8 +108,8 @@ def blast_primers(database, primer_dict, working_dir, prefix):
     reference_count = len(reference_count)
     for primer, primer_seq in primer_dict.items():
         sys.stderr.write(primer + "\n")
-        single_primer_file = "{}/{}.tmp.fa".format(working_dir, prefix)
-        tmp_alignment = "{}/{}.tmp.aln".format(working_dir, prefix)
+        single_primer_file = os.path.join(working_dir, prefix + ".tmp.fa")
+        tmp_alignment = os.path.join(working_dir, prefix + '.tmp.aln')
         with open(single_primer_file, "w") as o:
             o.write(">{}\n{}".format(primer, primer_seq))
         subprocess.Popen(
@@ -191,7 +194,7 @@ def blast_primers(database, primer_dict, working_dir, prefix):
     stats_dict = defaultdict(lambda: defaultdict(lambda: "MISSING"))
     single = defaultdict(lambda: set())
     double = defaultdict(lambda: set())
-    with open("{}/{}_primer_cheq.tsv".format(working_dir, prefix), 'w') as report:
+    with open(os.path.join(working_dir, prefix +"_primer_cheq.tsv"), 'w') as report:
         report.write("Reference\tContig\tPrimer\tPrimer_Seq\tAlignment\tCount\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
         for i in outlist:
             ref = i[0]
@@ -208,7 +211,7 @@ def blast_primers(database, primer_dict, working_dir, prefix):
             elif alert == "HIGH" and stats_dict[primer][ref] != "LOW" and stats_dict[primer][ref] != "MEDIUM":
                 stats_dict[primer][ref] = "HIGH"
             report.write("\t".join(i) + "\n")
-    with open("{}/{}_summary.tsv".format(working_dir, prefix), 'w') as summary:
+    with open(os.path.join(working_dir, prefix + "_summary.tsv"), 'w') as summary:
         summary.write("Primer\tSingle_target\tMultiple_target\tMissing\tLow\tMedium\tHigh\n")
         for i in stats_dict:
             summary.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(i, len(single[i]) - len(double[i]), len(double[i]),
@@ -249,7 +252,8 @@ if args.ncbi_virus is None and args.ncbi_bacteria is None and args.directory_db 
     sys.stderr.write("You must provide a database of references to check against.\n")
     sys.exit(0)
 
-open("{}/{}_db.fasta".format(args.working_directory, args.prefix), 'w').close()
+primer_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
+open(primer_file, 'w').close()
 
 if args.ncbi_virus:
     for i in args.ncbi_virus:
@@ -271,4 +275,4 @@ if args.glob_db:
         fasta_files = get_db_glob(i)
         get_db_fastas(fasta_files, args.working_directory, args.prefix)
 
-blast_primers("{}/{}_db.fasta".format(args.working_directory, args.prefix), primer_dict, args.working_directory, args.prefix)
+blast_primers(primer_file, primer_dict, args.working_directory, args.prefix)

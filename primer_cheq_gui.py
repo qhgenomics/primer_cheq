@@ -34,6 +34,8 @@ class PrimerCheqGUI(QWidget):
         layout.addWidget(self.working_dir_input)
         layout.addWidget(self.working_dir_button)
 
+        layout = QVBoxLayout()
+
         # NCBI Virus
         self.ncbi_virus_label = QLabel('NCBI Virus Taxid:')
         self.ncbi_virus_input = QLineEdit(self)

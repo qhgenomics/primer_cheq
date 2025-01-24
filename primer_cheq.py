@@ -46,7 +46,7 @@ def download_bac(taxnum, working_dir, prefix, datasets="datasets"):
     subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
         f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder
     ), shell=True).wait()
-    fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset", "*", "*.fna")
+    fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset", "*", "*.fna"))
     if len(fasta_files) < 1:
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)
@@ -94,7 +94,7 @@ def get_db_fasta(fasta_file, working_dir, prefix):
 
 
 
-def blast_primers(database, primer_dict, working_dir, prefix):
+def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn"):
     num = 0
     subject_names = {}
     outlist = []
@@ -113,8 +113,8 @@ def blast_primers(database, primer_dict, working_dir, prefix):
         with open(single_primer_file, "w") as o:
             o.write(">{}\n{}".format(primer, primer_seq))
         subprocess.Popen(
-            "blastn -max_target_seqs 1000000 -query {} -subject {} -outfmt 3 -task blastn-short > {}".format(
-                single_primer_file, database, tmp_alignment), shell=True).wait()
+            "{} -max_target_seqs 1000000 -query {} -subject {} -outfmt 3 -task blastn-short > {}".format(
+                blastn_loc, single_primer_file, database, tmp_alignment), shell=True).wait()
         qdict, mutdict = {}, {}
         # parse the alignment
         with open(tmp_alignment) as f:
@@ -223,56 +223,56 @@ def blast_primers(database, primer_dict, working_dir, prefix):
 
 
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument("-p", "--primers", help="FASTA file of primers to check.", required=True, metavar="primer.fasta")
-parser.add_argument("-s", "--prefix", help="Prefix for output files in workign directory.", required=True, metavar="sample_name")
-parser.add_argument("-w", '--working_directory', help="Path for intermediate and output files.", required=True, metavar="working_dir")
-parser.add_argument("-v", "--ncbi_virus", action="append", help="Download a database of viral references from NCBI using a taxid.", metavar="10244")
-parser.add_argument("-b", "--ncbi_bacteria", action="append", help="Download a database of microbial references from NCBI using a taxid", metavar="590")
-parser.add_argument("-d", "--directory_db", action="append", help="A directory of FASTA files, one for each reference.")
-parser.add_argument("-f", "--fasta_db", action="append", help="A single fasta file, each entry will be treated as its own reference.")
-parser.add_argument("-g", "--glob_db", action="append", help="A glob used to identify FASTA files, each FASTA will be treated as its own reference.")
-
-
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--primers", help="FASTA file of primers to check.", required=True, metavar="primer.fasta")
+    parser.add_argument("-s", "--prefix", help="Prefix for output files in workign directory.", required=True, metavar="sample_name")
+    parser.add_argument("-w", '--working_directory', help="Path for intermediate and output files.", required=True, metavar="working_dir")
+    parser.add_argument("-v", "--ncbi_virus", action="append", help="Download a database of viral references from NCBI using a taxid.", metavar="10244")
+    parser.add_argument("-b", "--ncbi_bacteria", action="append", help="Download a database of microbial references from NCBI using a taxid", metavar="590")
+    parser.add_argument("-d", "--directory_db", action="append", help="A directory of FASTA files, one for each reference.")
+    parser.add_argument("-f", "--fasta_db", action="append", help="A single fasta file, each entry will be treated as its own reference.")
+    parser.add_argument("-g", "--glob_db", action="append", help="A glob used to identify FASTA files, each FASTA will be treated as its own reference.")
 
 
-args = parser.parse_args()
 
 
-primer_dict = get_primer_sequences(args.primers)
+    args = parser.parse_args()
 
-if not os.path.exists(args.working_directory):
-    os.makedirs(args.working_directory)
-elif os.path.exists(args.working_directory) and not os.path.isdir(args.working_directory):
-    sys.stderr.write("The working directory you provided is not a directory.\n")
-    sys.exit(0)
 
-if args.ncbi_virus is None and args.ncbi_bacteria is None and args.directory_db is None and args.fasta_db is None and args.glob_db is None:
-    sys.stderr.write("You must provide a database of references to check against.\n")
-    sys.exit(0)
+    primer_dict = get_primer_sequences(args.primers)
 
-primer_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
-open(primer_file, 'w').close()
+    if not os.path.exists(args.working_directory):
+        os.makedirs(args.working_directory)
+    elif os.path.exists(args.working_directory) and not os.path.isdir(args.working_directory):
+        sys.stderr.write("The working directory you provided is not a directory.\n")
+        sys.exit(0)
 
-if args.ncbi_virus:
-    for i in args.ncbi_virus:
-        fasta_file = download_virus(i, args.working_directory, args.prefix)
-        get_db_fasta(fasta_file, args.working_directory, args.prefix)
-if args.ncbi_bacteria:
-    for i in args.ncbi_bacteria:
-        fasta_files = download_bac(i, args.working_directory, args.prefix)
-        get_db_fastas(fasta_files, args.working_directory, args.prefix)
-if args.directory_db:
-    for i in args.directory_db:
-        fasta_files = get_db_folder(i)
-        get_db_fastas(fasta_files, args.working_directory, args.prefix)
-if args.fasta_db:
-    for i in args.fasta_db:
-        get_db_fasta(i, args.working_directory, args.prefix)
-if args.glob_db:
-    for i in args.glob_db:
-        fasta_files = get_db_glob(i)
-        get_db_fastas(fasta_files, args.working_directory, args.prefix)
+    if args.ncbi_virus is None and args.ncbi_bacteria is None and args.directory_db is None and args.fasta_db is None and args.glob_db is None:
+        sys.stderr.write("You must provide a database of references to check against.\n")
+        sys.exit(0)
 
-blast_primers(primer_file, primer_dict, args.working_directory, args.prefix)
+    primer_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
+    open(primer_file, 'w').close()
+
+    if args.ncbi_virus:
+        for i in args.ncbi_virus:
+            fasta_file = download_virus(i, args.working_directory, args.prefix)
+            get_db_fasta(fasta_file, args.working_directory, args.prefix)
+    if args.ncbi_bacteria:
+        for i in args.ncbi_bacteria:
+            fasta_files = download_bac(i, args.working_directory, args.prefix)
+            get_db_fastas(fasta_files, args.working_directory, args.prefix)
+    if args.directory_db:
+        for i in args.directory_db:
+            fasta_files = get_db_folder(i)
+            get_db_fastas(fasta_files, args.working_directory, args.prefix)
+    if args.fasta_db:
+        for i in args.fasta_db:
+            get_db_fasta(i, args.working_directory, args.prefix)
+    if args.glob_db:
+        for i in args.glob_db:
+            fasta_files = get_db_glob(i)
+            get_db_fastas(fasta_files, args.working_directory, args.prefix)
+
+    blast_primers(primer_file, primer_dict, args.working_directory, args.prefix)

@@ -27,7 +27,7 @@ def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
     subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
         f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder
     ), shell=True).wait()
-    fasta_file = os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data" "genomic.fna")
+    fasta_file = os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data", "genomic.fna")
     if not os.path.exists(fasta_file):
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)
@@ -46,7 +46,7 @@ def download_bac(taxnum, working_dir, prefix, datasets="datasets"):
     subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
         f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder
     ), shell=True).wait()
-    fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset", "*", "*.fna")
+    fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset", "*", "*.fna"))
     if len(fasta_files) < 1:
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)

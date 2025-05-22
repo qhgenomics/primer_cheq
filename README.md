@@ -25,6 +25,7 @@ Tool for checking primer coverage and drift.
     ```sh
     conda env create -f environment.yml
     ```
+3. Ensure unzip and datasets are in your path
 
 ## Usage
 

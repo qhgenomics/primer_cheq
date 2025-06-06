@@ -11,6 +11,7 @@ Tool for checking primer coverage and drift.
 - Python 3.x
 - BLAST+ (installed and available in the system PATH)
 - NCBI Datasets command-line tool (installed and available in the system PATH)
+- unzip bash tool (installed and available in the system PATH)
 
 ## Installation
 
@@ -24,6 +25,7 @@ Tool for checking primer coverage and drift.
     ```sh
     conda env create -f environment.yml
     ```
+3. Ensure unzip and datasets are in your path
 
 ## Usage
 
@@ -35,7 +37,7 @@ python primer_cheq.py -p primer.fasta -o sample_name -w working_dir [options]
 ### Arguments
 #### Required
 - `-p`, `--primers`: FASTA file of primers to check.
-- `-o`, `--prefix`: Prefix for output files in the working directory.
+- `-s`, `--prefix`: Prefix for output files in the working directory.
 - `-w`, `--working_directory`: Path for intermediate and output files.
 #### One or more of the following
 - `-v`, `--ncbi_virus`: Download a database of viral references from NCBI using a taxid.

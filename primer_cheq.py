@@ -27,7 +27,7 @@ def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
     subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
         f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder
     ), shell=True).wait()
-    fasta_file = os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data" "genomic.fna")
+    fasta_file = os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data", "genomic.fna")
     if not os.path.exists(fasta_file):
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)
@@ -275,4 +275,4 @@ if __name__ == "__main__":
             fasta_files = get_db_glob(i)
             get_db_fastas(fasta_files, args.working_directory, args.prefix)
 
-    blast_primers(primer_file, primer_dict, args.working_directory, args.prefix)
+blast_primers(primer_file, primer_dict, args.working_directory, args.prefix)

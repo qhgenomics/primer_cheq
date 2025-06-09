@@ -1,7 +1,24 @@
 import sys, os
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QCheckBox, QGridLayout, QMessageBox
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 import subprocess
 from primer_cheq import get_primer_sequences, get_db_glob, get_db_fasta, get_db_fastas, get_db_folder, download_bac, download_virus, blast_primers
+
+class BlastWorker(QThread):
+    finished = pyqtSignal()
+
+    def __init__(self, primer_file, primer_dict, working_directory, prefix, blastn_loc):
+        super().__init__()
+        self.primer_file = primer_file
+        self.primer_dict = primer_dict
+        self.working_directory = working_directory
+        self.prefix = prefix
+        self.blastn_loc = blastn_loc
+
+    def run(self):
+        blast_primers(self.primer_file, self.primer_dict, self.working_directory, self.prefix, self.blastn_loc)
+        self.finished.emit()
+
 class PrimerCheqGUI(QWidget):
     def __init__(self):
         super().__init__()
@@ -30,7 +47,7 @@ class PrimerCheqGUI(QWidget):
         layout.addWidget(self.blast_button, 2, 3)
 
         self.output_label = QLabel('Output options (required)')
-        self.output_label.setStyleSheet("background-color: lightyellow; font-weight: bold") 
+        self.output_label.setStyleSheet("background-color: lightyellow; font-weight: bold")
         layout.addWidget(self.output_label, 3, 0, 1, 4)
         # Prefix
         self.prefix_label = QLabel('Prefix:')
@@ -48,7 +65,7 @@ class PrimerCheqGUI(QWidget):
         layout.addWidget(self.working_dir_button, 5, 3)
 
         self.output_label = QLabel('Genome database options (pick 1 or more)')
-        self.output_label.setStyleSheet("background-color: lightyellow; font-weight: bold") 
+        self.output_label.setStyleSheet("background-color: lightyellow; font-weight: bold")
         layout.addWidget(self.output_label, 6, 0, 1, 4)
         # NCBI Virus
         self.ncbi_virus_label = QLabel('NCBI Virus Taxid (will download fastas):')
@@ -99,7 +116,6 @@ class PrimerCheqGUI(QWidget):
         fname = QFileDialog.getOpenFileName(self, 'Open file', '', 'FASTA files (*.fasta *.fa)')
         if fname[0]:
             self.primer_input.setText(fname[0])
-
 
     def browse_blast(self):
         fname = QFileDialog.getOpenFileName(self, 'Open file', '', 'BLASTn binary (*.exe, *)')
@@ -161,7 +177,27 @@ class PrimerCheqGUI(QWidget):
             fasta_files = get_db_glob(glob_db)
             get_db_fastas(fasta_files, working_directory, prefix)
 
-        blast_primers(primer_file, primer_dict, working_directory, prefix, blastn_loc)
+        self.worker = BlastWorker(primer_file, primer_dict, working_directory, prefix, blastn_loc)
+        self.worker.finished.connect(self.on_blast_finished)
+        self.worker.start()
+
+        self.animation_label = QLabel('Running...')
+        self.animation_label.setStyleSheet("background-color: lightgreen; font-weight: bold")
+        self.layout().addWidget(self.animation_label, 13, 0, 1, 4)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_animation)
+        self.timer.start(500)
+
+    def update_animation(self):
+        current_text = self.animation_label.text()
+        if current_text.endswith('...'):
+            self.animation_label.setText('Running')
+        else:
+            self.animation_label.setText(current_text + '.')
+
+    def on_blast_finished(self):
+        self.timer.stop()
+        self.animation_label.setText('Finished')
         QMessageBox.information(self, 'Success', 'Script ran successfully.')
 
 if __name__ == '__main__':

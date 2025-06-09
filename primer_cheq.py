@@ -76,10 +76,12 @@ def get_db_fastas(fasta_list, working_dir, prefix):
         for fasta in fasta_list:
             filename = os.path.basename(fasta)
             filename = os.path.splitext(filename)[0]
+            filename.replace("|", "_")
             with open(fasta) as f:
                 for line in f:
                     if line.startswith(">"):
                         contig_name = line.split()[0][1:]
+                        contig_name.replace("|", "_")
                         o.write(">{}|{}\n".format(filename, contig_name))
                     else:
                         o.write(line)
@@ -97,15 +99,20 @@ def get_db_fasta(fasta_file, working_dir, prefix):
 def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn"):
     num = 0
     subject_names = {}
+    subject_seqs = defaultdict(lambda: "")
     outlist = []
     reference_count = set()
     with open(os.path.join(working_dir, "{}_db.fasta".format(prefix))) as f:
         for line in f:
             if line.startswith(">"):
                 num += 1
-                subject_names["Subject_{}".format(num)] = (line.split("|")[0][1:], "|".join(line.rstrip().split("|")[1:]))
+                subject_name = "Subject_{}".format(num)
+                subject_names[subject_name] = (line.split("|")[0][1:], "|".join(line.rstrip().split("|")[1:]))
                 reference_count.add(line.split("|")[0])
+            else:
+                subject_seqs[subject_name] += line.rstrip()
     reference_count = len(reference_count)
+    trans_table = {"a":"t", "t":"a", "c":"g", "g":"c",}
     for primer, primer_seq in primer_dict.items():
         sys.stderr.write(primer + "\n")
         single_primer_file = os.path.join(working_dir, prefix + ".tmp.fa")
@@ -145,6 +152,32 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
                     continue
                 lastseq = line.split()[0]
                 seq = line[refstart:refend]
+                start = int(line.split()[1])
+                end = int(line.split()[3])
+                if start < end:
+                    start = start - (len(seq) - len(seq.lstrip()))
+                    seq = list(seq)
+                    for num, rbase in enumerate(refseq):
+                        if seq[num] == " ":
+                            if start+num < 0 or start+num >= len(subject_seqs[lastseq]):
+                                seq[num] = '-'
+                            elif subject_seqs[lastseq][start+num].lower() == refseq[num].lower():
+                                seq[num] = '.'
+                            else:
+                                seq[num] = subject_seqs[lastseq][start+num].lower()
+                else:
+                    start = start + (len(seq) - len(seq.lstrip()))
+                    seq = list(seq)
+                    for num, rbase in enumerate(refseq):
+                        print(trans_table[subject_seqs[lastseq][start-num-1].lower()])
+                        if seq[num] == " ":
+                            if start-num-1 < 0 or start-num-1 >= len(subject_seqs[lastseq]):
+                                seq[num] = '-'
+                            elif subject_seqs[lastseq][start-num-1].lower() == trans_table[refseq[num].lower()]:
+                                seq[num] = '.'
+                            else:
+                                seq[num] = trans_table[subject_seqs[lastseq][start-num-1].lower()]
+                seq = "".join(seq)
                 thename = subject_names[line.split()[0]]
                 sampledict[thename] = seq
                 if seq in qdict:

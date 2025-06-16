@@ -112,7 +112,7 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
             else:
                 subject_seqs[subject_name] += line.rstrip()
     reference_count = len(reference_count)
-    trans_table = {"a":"t", "t":"a", "c":"g", "g":"c",}
+    trans_table = {"a":"t", "t":"a", "c":"g", "g":"c", "u":"a", "n":"n", "r":"n", "y":"n", "s":"n", "w":"n", "k":"n", "m":"n", "b":"n", "d":"n", "h":"n", "v":"n"}
     for primer, primer_seq in primer_dict.items():
         sys.stderr.write(primer + "\n")
         single_primer_file = os.path.join(working_dir, prefix + ".tmp.fa")
@@ -169,7 +169,6 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
                     start = start + (len(seq) - len(seq.lstrip()))
                     seq = list(seq)
                     for num, rbase in enumerate(refseq):
-                        print(trans_table[subject_seqs[lastseq][start-num-1].lower()])
                         if seq[num] == " ":
                             if start-num-1 < 0 or start-num-1 >= len(subject_seqs[lastseq]):
                                 seq[num] = '-'

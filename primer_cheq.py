@@ -136,7 +136,8 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                 num += 1
                 subject_name = "Subject_{}".format(num)
                 subject_names[subject_name] = (line.split("|")[0][1:], "|".join(line.rstrip().split("|")[1:]))
-                reference_count.add(line.split("|")[0])
+                if not line.rstrip()[1:] in primer_dict:
+                    reference_count.add(line.split("|")[0])
             else:
                 subject_seqs[subject_name] += line.rstrip()
     reference_count = len(reference_count)
@@ -160,11 +161,10 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
             refstart = line.find(refseq)
             refseq = refseq.lower()
             refend = refstart + len(refseq)
-            lastseq = None
             actual_bases = 0
             last3pos = set()
-            sampledict = {}
             qdict = {}
+            sampledict = {}
             for num, i in enumerate(refseq[::-1]):
                 if i != '-':
                     actual_bases += 1
@@ -193,6 +193,10 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                                 seq[num] = '-'
                             elif subject_seqs[lastseq][start+num].lower() == refseq[num].lower():
                                 seq[num] = '.'
+                            elif subject_seqs[lastseq][start+num].lower() == 't' and refseq[num].lower() == 'u':
+                                seq[num] = '.'
+                            elif subject_seqs[lastseq][start + num].lower() == 'u' and refseq[num].lower() == 't':
+                                seq[num] = '.'
                             else:
                                 seq[num] = subject_seqs[lastseq][start+num].lower()
                 else:
@@ -207,10 +211,12 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                             else:
                                 seq[num] = trans_table[subject_seqs[lastseq][start-num-1].lower()]
                 seq = "".join(seq)
-                sampledict[thename] = seq
                 if seq in qdict:
                     qdict[seq] += 1
+                    sampledict[seq].append((thename[0], thename[1], start < end, start))
                     continue
+                else:
+                    sampledict[seq] = [(thename[0], thename[1], start < end, start)]
                 insert, deletion, substitution = 0, 0, 0
                 last3, last1 = False, False
                 for num, (i, j) in enumerate(zip(refseq, seq)):
@@ -230,7 +236,6 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                     continue
                 qdict[seq] = 1
                 mutdict[seq] = (substitution, insert, deletion, last3, last1)
-
         seqlist = list(qdict)
         seqlist.sort(key=lambda x: qdict[x], reverse=True)
         for i in seqlist:
@@ -246,11 +251,18 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                 alert = "MEDIUM"
             else:
                 alert = "LOW"
-            for qq in sampledict:
-                if sampledict[qq] == i:
-                    outlist.append(list(map(str,
-                                        [qq[0], qq[1], primer, primer_seq, i, j, alert, substitution, insert, deletion,
-                                         last3, last1])))
+            for qq in sampledict[i]:
+                aa = ''
+                bb = ''
+                for a, b in zip (refseq, i):
+                    if a == b == "-":
+                        pass
+                    else:
+                        aa += a
+                        bb += b
+                outlist.append(list(map(str,
+                                    [qq[0], qq[1], primer, aa, bb, j, alert, substitution, insert, deletion,
+                                     last3, last1])))
 
     stats_dict = defaultdict(lambda: defaultdict(lambda: "MISSING"))
     single = defaultdict(lambda: set())
@@ -294,8 +306,8 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--directory_db", action="append", help="A directory of FASTA files, one for each reference.")
     parser.add_argument("-f", "--fasta_db", action="append", help="A single fasta file, each entry will be treated as its own reference.")
     parser.add_argument("-g", "--glob_db", action="append", help="A glob used to identify FASTA files, each FASTA will be treated as its own reference.")
-    parser.add_argument("-i", "--max_indel", default=2, help="Maximum indels allowed in reported hits.")
-    parser.add_argument("-m", "--max_mismatch", default=5, help="Maximum mismatches allowed in reported hits.")
+    parser.add_argument("-i", "--max_indel", type=int, default=2, help="Maximum indels allowed in reported hits.")
+    parser.add_argument("-m", "--max_mismatch", type=int, default=5, help="Maximum mismatches allowed in reported hits.")
 
 
 

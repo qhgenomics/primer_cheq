@@ -6,6 +6,17 @@ import os
 from collections import defaultdict
 # read in primer sequences
 def get_primer_sequences(primers):
+    bases = {"r":["a","g"],
+             "y":["c","t"],
+             "s":["c","g"],
+             "w":["a","t"],
+             "k":["g","t"],
+             "m":["a","c"],
+             "b":["c","g","t"],
+             "d":["a","g","t"],
+             "h":["a","c","t"],
+             "v":["a","c","g"],
+             "n":["a","c","g","t"]}
     with open(primers) as f:
         primer_dict = {}
         for line in f:
@@ -14,7 +25,24 @@ def get_primer_sequences(primers):
                 primer_dict[name] = ""
             else:
                 primer_dict[name] += line.rstrip().lower()
-    return primer_dict
+    new_primer_dict = {}
+    for primer, oldseq in primer_dict.items():
+        newseqs = set()
+        todoseq = [list(oldseq)]
+        while len(todoseq) > 0:
+            seq = todoseq.pop()
+            if set(seq) <= set("acgt"):
+                newseqs.add("".join(seq))
+            else:
+                for num in range(len(seq)):
+                    if seq[num] in bases:
+                        for i in bases[seq[num]]:
+                            newseq = seq[:num] + [i] + seq[num+1:]
+                            todoseq.append(newseq)
+                        break
+        for num, i in enumerate(newseqs):
+            new_primer_dict["{}|var{}".format(primer, num+1)] = i
+    return new_primer_dict
 
 
 # downloads viruses into a single file
@@ -84,7 +112,7 @@ def get_db_fastas(fasta_list, working_dir, prefix):
                         contig_name.replace("|", "_")
                         o.write(">{}|{}\n".format(filename, contig_name))
                     else:
-                        o.write(line)
+                        o.write(line.lower())
 
 def get_db_fasta(fasta_file, working_dir, prefix):
     with open(os.path.join(working_dir, "{}_db.fasta".format(prefix)), 'a') as o, open(fasta_file) as f:
@@ -92,11 +120,11 @@ def get_db_fasta(fasta_file, working_dir, prefix):
             if line.startswith(">"):
                 o.write(line.split()[0] + "|na\n")
             else:
-                o.write(line)
+                o.write(line.lower())
 
 
 
-def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn"):
+def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mismatch, blastn_loc="blastn"):
     num = 0
     subject_names = {}
     subject_seqs = defaultdict(lambda: "")
@@ -112,15 +140,15 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
             else:
                 subject_seqs[subject_name] += line.rstrip()
     reference_count = len(reference_count)
-    trans_table = {"a":"t", "t":"a", "c":"g", "g":"c", "u":"a", "n":"n", "r":"n", "y":"n", "s":"n", "w":"n", "k":"n", "m":"n", "b":"n", "d":"n", "h":"n", "v":"n"}
+    trans_table = {"-":"-", "a":"t", "t":"a", "c":"g", "g":"c", "u":"a", "n":"n", "r":"n", "y":"n", "s":"n", "w":"n", "k":"n", "m":"n", "b":"n", "d":"n", "h":"n", "v":"n"}
     for primer, primer_seq in primer_dict.items():
-        sys.stderr.write(primer + "\n")
+        sys.stderr.write(primer + "\n" + primer_seq + "\n")
         single_primer_file = os.path.join(working_dir, prefix + ".tmp.fa")
         tmp_alignment = os.path.join(working_dir, prefix + '.tmp.aln')
         with open(single_primer_file, "w") as o:
             o.write(">{}\n{}".format(primer, primer_seq))
         subprocess.Popen(
-            "{} -max_target_seqs 1000000 -query {} -subject {} -outfmt 3 -task blastn-short > {}".format(
+            "{} -max_target_seqs 1000000 -gapextend 2 -penalty -1 -gapopen 0 -query {} -subject {} -outfmt 3 -task blastn-short > {}".format(
                 blastn_loc, single_primer_file, database, tmp_alignment), shell=True).wait()
         qdict, mutdict = {}, {}
         # parse the alignment
@@ -130,6 +158,7 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
             # read the Query line
             refseq = line.split()[2]
             refstart = line.find(refseq)
+            refseq = refseq.lower()
             refend = refstart + len(refseq)
             lastseq = None
             actual_bases = 0
@@ -148,10 +177,11 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
                 if line.rstrip() == "":
                     break
                 # only get the top hit for each contig
-                if line.split()[0] == lastseq:
-                    continue
                 lastseq = line.split()[0]
-                seq = line[refstart:refend]
+                thename = subject_names[lastseq]
+                if "{}|{}".format(thename[0], thename[1]) in primer_dict:
+                    continue
+                seq = line[refstart:refend].lower()
                 start = int(line.split()[1])
                 end = int(line.split()[3])
                 if start < end:
@@ -177,7 +207,6 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
                             else:
                                 seq[num] = trans_table[subject_seqs[lastseq][start-num-1].lower()]
                 seq = "".join(seq)
-                thename = subject_names[line.split()[0]]
                 sampledict[thename] = seq
                 if seq in qdict:
                     qdict[seq] += 1
@@ -197,7 +226,7 @@ def blast_primers(database, primer_dict, working_dir, prefix, blastn_loc="blastn
                         last1 = True
                     elif j != '.' and num in last3pos:
                         last3 = True
-                if deletion >= 3:
+                if deletion >= max_indel or substitution >= max_mismatch:
                     continue
                 qdict[seq] = 1
                 mutdict[seq] = (substitution, insert, deletion, last3, last1)
@@ -265,7 +294,8 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--directory_db", action="append", help="A directory of FASTA files, one for each reference.")
     parser.add_argument("-f", "--fasta_db", action="append", help="A single fasta file, each entry will be treated as its own reference.")
     parser.add_argument("-g", "--glob_db", action="append", help="A glob used to identify FASTA files, each FASTA will be treated as its own reference.")
-
+    parser.add_argument("-i", "--max_indel", default=2, help="Maximum indels allowed in reported hits.")
+    parser.add_argument("-m", "--max_mismatch", default=5, help="Maximum mismatches allowed in reported hits.")
 
 
 
@@ -285,8 +315,10 @@ if __name__ == "__main__":
         sys.exit(0)
 
     primer_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
-    open(primer_file, 'w').close()
-
+    with open(primer_file, 'w') as o:
+        for i, j in primer_dict.items():
+            o.write(">{}\n{}\n".format(i, j))
+      
     if args.ncbi_virus:
         for i in args.ncbi_virus:
             fasta_file = download_virus(i, args.working_directory, args.prefix)
@@ -307,4 +339,4 @@ if __name__ == "__main__":
             fasta_files = get_db_glob(i)
             get_db_fastas(fasta_files, args.working_directory, args.prefix)
 
-blast_primers(primer_file, primer_dict, args.working_directory, args.prefix)
+blast_primers(primer_file, primer_dict, args.working_directory, args.prefix, args.max_indel, args.max_mismatch)

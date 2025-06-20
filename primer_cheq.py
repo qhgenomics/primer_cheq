@@ -185,7 +185,7 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                 start = int(line.split()[1])
                 end = int(line.split()[3])
                 if start < end:
-                    start = start - (len(seq) - len(seq.lstrip()))
+                    start = start - (len(seq) - len(seq.lstrip())) -1
                     seq = list(seq)
                     for num, rbase in enumerate(refseq):
                         if seq[num] == " ":
@@ -200,23 +200,23 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                             else:
                                 seq[num] = subject_seqs[lastseq][start+num].lower()
                 else:
-                    start = start + (len(seq) - len(seq.lstrip()))
+                    start = start + (len(seq) - len(seq.lstrip())) -1
                     seq = list(seq)
                     for num, rbase in enumerate(refseq):
                         if seq[num] == " ":
-                            if start-num-1 < 0 or start-num-1 >= len(subject_seqs[lastseq]):
+                            if start-num < 0 or start-num >= len(subject_seqs[lastseq]):
                                 seq[num] = '-'
-                            elif subject_seqs[lastseq][start-num-1].lower() == trans_table[refseq[num].lower()]:
+                            elif subject_seqs[lastseq][start-num].lower() == trans_table[refseq[num].lower()]:
                                 seq[num] = '.'
                             else:
-                                seq[num] = trans_table[subject_seqs[lastseq][start-num-1].lower()]
+                                seq[num] = trans_table[subject_seqs[lastseq][start-num].lower()]
                 seq = "".join(seq)
                 if seq in qdict:
                     qdict[seq] += 1
-                    sampledict[seq].append((thename[0], thename[1], start < end, start))
+                    sampledict[seq].append((thename[0], thename[1], start < end, start+1))
                     continue
                 else:
-                    sampledict[seq] = [(thename[0], thename[1], start < end, start)]
+                    sampledict[seq] = [(thename[0], thename[1], start < end, start+1)]
                 insert, deletion, substitution = 0, 0, 0
                 last3, last1 = False, False
                 for num, (i, j) in enumerate(zip(refseq, seq)):

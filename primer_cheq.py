@@ -130,7 +130,7 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
     subject_seqs = defaultdict(lambda: "")
     outlist = []
     reference_count = set()
-    with open(os.path.join(working_dir, "{}_db.fasta".format(prefix))) as f:
+    with open(database) as f:
         for line in f:
             if line.startswith(">"):
                 num += 1
@@ -148,94 +148,109 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
         tmp_alignment = os.path.join(working_dir, prefix + '.tmp.aln')
         with open(single_primer_file, "w") as o:
             o.write(">{}\n{}".format(primer, primer_seq))
-        subprocess.Popen(
-            "{} -max_target_seqs 1000000 -gapextend 2 -penalty -1 -gapopen 0 -query {} -subject {} -outfmt 3 -task blastn-short > {}".format(
-                blastn_loc, single_primer_file, database, tmp_alignment), shell=True).wait()
-        qdict, mutdict = {}, {}
-        # parse the alignment
-        with open(tmp_alignment) as f:
-            while not line.startswith("Query_"):
-                line = f.readline()
-            # read the Query line
-            refseq = line.split()[2]
-            refstart = line.find(refseq)
-            refseq = refseq.lower()
-            refend = refstart + len(refseq)
-            actual_bases = 0
-            last3pos = set()
-            qdict = {}
-            sampledict = {}
-            for num, i in enumerate(refseq[::-1]):
-                if i != '-':
-                    actual_bases += 1
-                if actual_bases == 1:
-                    lastbase = len(refseq) - 1 - num
-                elif actual_bases <= 3:
-                    last3pos.add(len(refseq) - 1 - num)
-            # read the alignment lines
-            for line in f:
-                if line.rstrip() == "":
+        refs2process = list(subject_seqs)
+        while refs2process != []:
+            firstEntry = refs2process.pop(0)
+            refs2include = [firstEntry]
+            firstFasta = subject_names[firstEntry][0]
+            while refs2process != []:
+                if subject_names[refs2process[0]][0] == firstFasta:
+                    refs2include.append(refs2process.pop(0))
+                else:
                     break
-                # only get the top hit for each contig
-                lastseq = line.split()[0]
-                thename = subject_names[lastseq]
-                if "{}|{}".format(thename[0], thename[1]) in primer_dict:
-                    continue
-                seq = line[refstart:refend].lower()
-                start = int(line.split()[1])
-                end = int(line.split()[3])
-                if start < end:
-                    start = start - (len(seq) - len(seq.lstrip())) -1
-                    seq = list(seq)
-                    for num, rbase in enumerate(refseq):
-                        if seq[num] == " ":
-                            if start+num < 0 or start+num >= len(subject_seqs[lastseq]):
-                                seq[num] = '-'
-                            elif subject_seqs[lastseq][start+num].lower() == refseq[num].lower():
-                                seq[num] = '.'
-                            elif subject_seqs[lastseq][start+num].lower() == 't' and refseq[num].lower() == 'u':
-                                seq[num] = '.'
-                            elif subject_seqs[lastseq][start + num].lower() == 'u' and refseq[num].lower() == 't':
-                                seq[num] = '.'
-                            else:
-                                seq[num] = subject_seqs[lastseq][start+num].lower()
-                else:
-                    start = start + (len(seq) - len(seq.lstrip())) -1
-                    seq = list(seq)
-                    for num, rbase in enumerate(refseq):
-                        if seq[num] == " ":
-                            if start-num < 0 or start-num >= len(subject_seqs[lastseq]):
-                                seq[num] = '-'
-                            elif subject_seqs[lastseq][start-num].lower() == trans_table[refseq[num].lower()]:
-                                seq[num] = '.'
-                            else:
-                                seq[num] = trans_table[subject_seqs[lastseq][start-num].lower()]
-                seq = "".join(seq)
-                if seq in qdict:
-                    qdict[seq] += 1
-                    sampledict[seq].append((thename[0], thename[1], start < end, start+1))
-                    continue
-                else:
-                    sampledict[seq] = [(thename[0], thename[1], start < end, start+1)]
-                insert, deletion, substitution = 0, 0, 0
-                last3, last1 = False, False
-                for num, (i, j) in enumerate(zip(refseq, seq)):
-                    if i == '-' and j == '-':
-                        pass
-                    elif i == "-" or i == " ":
-                        insert += 1
-                    elif j == '-' or j == " ":
-                        deletion += 1
-                    elif j != '.':
-                        substitution += 1
-                    if j != '.' and num == lastbase:
-                        last1 = True
-                    elif j != '.' and num in last3pos:
-                        last3 = True
-                if deletion >= max_indel or substitution >= max_mismatch:
-                    continue
-                qdict[seq] = 1
-                mutdict[seq] = (substitution, insert, deletion, last3, last1)
+            with open(os.path.join(working_dir, prefix + '.tmp.ref.fa'), 'w') as o:
+                o.write(">{}\n{}\n".format(primer, primer_seq))
+                for i in refs2include:
+                    o.write(">{}\n{}\n".format(i, subject_seqs[i]))
+            print(firstFasta)
+            subprocess.Popen(
+                "{} -max_target_seqs 1000000 -gapextend 2 -penalty -1 -gapopen 0 -query {} -subject {} -outfmt 3 -task blastn-short > {}".format(
+                    blastn_loc, single_primer_file, database, tmp_alignment), shell=True).wait()
+            qdict, mutdict = {}, {}
+            # parse the alignment
+            with open(tmp_alignment) as f:
+                while not line.startswith("Query_"):
+                    line = f.readline()
+                # read the Query line
+                refseq = line.split()[2]
+                refstart = line.find(refseq)
+                refseq = refseq.lower()
+                refend = refstart + len(refseq)
+                actual_bases = 0
+                last3pos = set()
+                qdict = {}
+                sampledict = {}
+                for num, i in enumerate(refseq[::-1]):
+                    if i != '-':
+                        actual_bases += 1
+                    if actual_bases == 1:
+                        lastbase = len(refseq) - 1 - num
+                    elif actual_bases <= 3:
+                        last3pos.add(len(refseq) - 1 - num)
+                # read the alignment lines
+                for line in f:
+                    if line.rstrip() == "":
+                        break
+                    # only get the top hit for each contig
+                    lastseq = line.split()[0]
+                    thename = subject_names[lastseq]
+                    if "{}|{}".format(thename[0], thename[1]) in primer_dict:
+                        continue
+                    seq = line[refstart:refend].lower()
+                    start = int(line.split()[1])
+                    end = int(line.split()[3])
+                    if start < end:
+                        start = start - (len(seq) - len(seq.lstrip())) -1
+                        seq = list(seq)
+                        for num, rbase in enumerate(refseq):
+                            if seq[num] == " ":
+                                if start+num < 0 or start+num >= len(subject_seqs[lastseq]):
+                                    seq[num] = '-'
+                                elif subject_seqs[lastseq][start+num].lower() == refseq[num].lower():
+                                    seq[num] = '.'
+                                elif subject_seqs[lastseq][start+num].lower() == 't' and refseq[num].lower() == 'u':
+                                    seq[num] = '.'
+                                elif subject_seqs[lastseq][start + num].lower() == 'u' and refseq[num].lower() == 't':
+                                    seq[num] = '.'
+                                else:
+                                    seq[num] = subject_seqs[lastseq][start+num].lower()
+                    else:
+                        start = start + (len(seq) - len(seq.lstrip())) -1
+                        seq = list(seq)
+                        for num, rbase in enumerate(refseq):
+                            if seq[num] == " ":
+                                if start-num < 0 or start-num >= len(subject_seqs[lastseq]):
+                                    seq[num] = '-'
+                                elif subject_seqs[lastseq][start-num].lower() == trans_table[refseq[num].lower()]:
+                                    seq[num] = '.'
+                                else:
+                                    seq[num] = trans_table[subject_seqs[lastseq][start-num].lower()]
+                    seq = "".join(seq)
+                    if seq in qdict:
+                        qdict[seq] += 1
+                        sampledict[seq].append((thename[0], thename[1], start < end, start+1))
+                        continue
+                    else:
+                        sampledict[seq] = [(thename[0], thename[1], start < end, start+1)]
+                    insert, deletion, substitution = 0, 0, 0
+                    last3, last1 = False, False
+                    for num, (i, j) in enumerate(zip(refseq, seq)):
+                        if i == '-' and j == '-':
+                            pass
+                        elif i == "-" or i == " ":
+                            insert += 1
+                        elif j == '-' or j == " ":
+                            deletion += 1
+                        elif j != '.':
+                            substitution += 1
+                        if j != '.' and num == lastbase:
+                            last1 = True
+                        elif j != '.' and num in last3pos:
+                            last3 = True
+                    if deletion >= max_indel or substitution >= max_mismatch:
+                        continue
+                    qdict[seq] = 1
+                    mutdict[seq] = (substitution, insert, deletion, last3, last1)
         seqlist = list(qdict)
         seqlist.sort(key=lambda x: qdict[x], reverse=True)
         for i in seqlist:
@@ -328,9 +343,7 @@ if __name__ == "__main__":
 
     primer_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
     with open(primer_file, 'w') as o:
-        for i, j in primer_dict.items():
-            o.write(">{}\n{}\n".format(i, j))
-      
+        pass
     if args.ncbi_virus:
         for i in args.ncbi_virus:
             fasta_file = download_virus(i, args.working_directory, args.prefix)

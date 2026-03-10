@@ -284,6 +284,25 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
     double = defaultdict(lambda: set())
     with open(os.path.join(working_dir, prefix +"_primer_cheq.tsv"), 'w') as report:
         report.write("Reference\tContig\tPrimer\tPrimer_Seq\tAlignment\tCount\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
+        best_hit = {}
+        for i in outlist:
+            primer = "|".join(i[2].split("|")[:-1])
+            if primer not in primer_dict:
+                best_hit[primer] = i
+            else:
+                if i[6] == best_hit[primer][6]:
+                    if i[4].count(".") > best_hit[primer][4].count("."):
+                        best_hit[primer] = i
+                elif i[6] == "LOW" and best_hit[primer][6] == "MEDIUM":
+                    best_hit[primer] = i
+                elif i[6] == "LOW" and best_hit[primer][6] == "HIGH":
+                    best_hit[primer] = i
+                elif i[6] == "MEDIUM" and best_hit[primer][6] == "HIGH":
+                    best_hit[primer] = i
+        outlist = []
+        for i in best_hit:
+            outlist.append([i] + best_hit[i][1:])
+        
         for i in outlist:
             ref = i[0]
             primer = i[2]

@@ -103,8 +103,6 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
         for name, seq in primer_dict.items():
             o.write(">{}\n{}\n".format(name, seq))
     sassy_output = os.path.join(working_dir, prefix + ".sassy.tsv")
-    print("{} search -f {} --threads {} -k {} {} > {}".format(
-        sassy_loc, primer_fasta, threads, max([max_indel, max_mismatch]),  database, sassy_output))
     subprocess.Popen("{} search -f {} --threads {} -k {} {} > {}".format(
         sassy_loc, primer_fasta, threads, max([max_indel, max_mismatch]),  database, sassy_output), shell=True).wait()
     outlist = []
@@ -114,7 +112,9 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
             primer, ref, cost, strand, start, end, match_region, cigar = line.rstrip().split("\t")
             cigar = parse_cigar(cigar)
             mismatch_count = sum([x[0] for x in cigar if x[1] == "X"])
-            indel_count = sum([x[0] for x in cigar if x[1] in ["I", "D"]])
+            insertion_count = sum([x[0] for x in cigar if x[1] == "I"])
+            deletion_count = sum([x[0] for x in cigar if x[1] == "D"])
+            indel_count = insertion_count + deletion_count
             if mismatch_count <= max_mismatch and indel_count <= max_indel:
                 ref, contig = ref.split("|")
                 match_region = match_region.lower()
@@ -122,10 +122,10 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
                     last_1 = False
                 else:
                     last_1 = True
-                if cigar[-1][0] >= 3 and i[1] == "=":
+                if cigar[-1][0] >= 3 and cigar[-1][1] == "=":
                     last_3 = False
                 else:
-                    last_3 = True    
+                    last_3 = True
                 if last_1:
                     alert = "HIGH"
                 elif indel_count >= 1:
@@ -136,7 +136,8 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
                     alert = "MEDIUM"
                 else:
                     alert = "LOW"
-                outlist.append([ref, contig, primer, primer_dict[primer], match_region, alert, str(mismatch_count), str(indel_count), str(last_3), str(last_1)])
+                outlist.append([ref, contig, primer, primer_dict[primer], match_region, alert, 
+                str(mismatch_count), str(insertion_count), str(deletion_count), str(last_3), str(last_1)])
     return(outlist)
 
 
@@ -145,11 +146,11 @@ def create_output(outlist, working_dir, prefix, reference_count):
     single = defaultdict(lambda: set())
     double = defaultdict(lambda: set())
     with open(os.path.join(working_dir, prefix +"_primer_cheq.tsv"), 'w') as report:
-        report.write("Reference\tContig\tPrimer\tPrimer_Seq\tMatch_Seq\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
+        report.write("Reference\tContig\tPrimer\tPrimer_Seq\tMatched_Seq\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
         for i in outlist:
             ref = i[0]
             primer = i[2]
-            alert = i[6]
+            alert = i[5]
             if ref in single[primer]:
                 double[primer].add(ref)
             else:

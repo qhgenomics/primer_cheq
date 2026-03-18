@@ -112,10 +112,10 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
         f.readline()
         for line in f:
             primer, ref, cost, strand, start, end, match_region, cigar = line.rstrip().split("\t")
+            cigar = parse_cigar(cigar)
             mismatch_count = sum([x[0] for x in cigar if x[1] == "X"])
             indel_count = sum([x[0] for x in cigar if x[1] in ["I", "D"]])
             if mismatch_count <= max_mismatch and indel_count <= max_indel:
-                cigar = parse_cigar(cigar)
                 ref, contig = ref.split("|")
                 match_region = match_region.lower()
                 if cigar[-1][1] == "=":

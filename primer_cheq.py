@@ -4,46 +4,7 @@ import glob
 import argparse
 import os
 from collections import defaultdict
-# read in primer sequences
-def get_primer_sequences(primers):
-    bases = {"r":["a","g"],
-             "y":["c","t"],
-             "s":["c","g"],
-             "w":["a","t"],
-             "k":["g","t"],
-             "m":["a","c"],
-             "b":["c","g","t"],
-             "d":["a","g","t"],
-             "h":["a","c","t"],
-             "v":["a","c","g"],
-             "n":["a","c","g","t"]}
-    with open(primers) as f:
-        primer_dict = {}
-        for line in f:
-            if line.startswith(">"):
-                name = line.rstrip()[1:]
-                primer_dict[name] = ""
-            else:
-                primer_dict[name] += line.rstrip().lower()
-    new_primer_dict = {}
-    for primer, oldseq in primer_dict.items():
-        newseqs = set()
-        todoseq = [list(oldseq)]
-        while len(todoseq) > 0:
-            seq = todoseq.pop()
-            if set(seq) <= set("acgt"):
-                newseqs.add("".join(seq))
-            else:
-                for num in range(len(seq)):
-                    if seq[num] in bases:
-                        for i in bases[seq[num]]:
-                            newseq = seq[:num] + [i] + seq[num+1:]
-                            todoseq.append(newseq)
-                        break
-        for num, i in enumerate(newseqs):
-            new_primer_dict["{}|var{}".format(primer, num+1)] = i
-    return new_primer_dict
-
+import re
 
 # downloads viruses into a single file
 def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
@@ -63,8 +24,7 @@ def download_virus(taxnum, working_dir, prefix, datasets="datasets"):
 
 
 
-# downloads bacteria into multiple files and then puts them into a single file with correct names
-# returns a dictionary of names that will
+# downloads bacteria into multiple files
 def download_bac(taxnum, working_dir, prefix, datasets="datasets"):
     datasets_filename = os.path.join(working_dir, prefix + "_ncbi_dataset.zip")
     subprocess.Popen("{} download genome taxon {} --assembly-source RefSeq --filename {}".format(
@@ -100,11 +60,13 @@ def get_db_glob(theglob):
 
 
 def get_db_fastas(fasta_list, working_dir, prefix):
+    reference_count = 0
     with open(os.path.join(working_dir, "{}_db.fasta".format(prefix)), 'a') as o:
         for fasta in fasta_list:
             filename = os.path.basename(fasta)
             filename = os.path.splitext(filename)[0]
             filename.replace("|", "_")
+            reference_count += 1
             with open(fasta) as f:
                 for line in f:
                     if line.startswith(">"):
@@ -113,196 +75,79 @@ def get_db_fastas(fasta_list, working_dir, prefix):
                         o.write(">{}|{}\n".format(filename, contig_name))
                     else:
                         o.write(line.lower())
+    return(reference_count)
 
 def get_db_fasta(fasta_file, working_dir, prefix):
+    reference_count = 0
     with open(os.path.join(working_dir, "{}_db.fasta".format(prefix)), 'a') as o, open(fasta_file) as f:
         for line in f:
             if line.startswith(">"):
                 o.write(line.split()[0] + "|na\n")
+                reference_count += 1
             else:
                 o.write(line.lower())
+    return(reference_count)
 
 
+def parse_cigar(cigar_str):
+    # Find all digits and all characters
+    digits = re.findall(r'[0-9]+', cigar_str)
+    chars = re.findall(r'[A-Z=]+', cigar_str)
+    
+    # Pair them together as (length, operation)
+    return list(zip(map(int, digits), chars))
 
-def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mismatch, blastn_loc="blastn"):
-    num = 0
-    subject_names = {}
-    subject_seqs = defaultdict(lambda: "")
+def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_mismatch=5, threads=1, sassy_loc="sassy"):
+    primer_fasta = os.path.join(working_dir, prefix + "_primers.fasta")
+    with open(primer_fasta, 'w') as o:
+        for name, seq in primer_dict.items():
+            o.write(">{}\n{}\n".format(name, seq))
+    sassy_output = os.path.join(working_dir, prefix + ".sassy.tsv")
+    print("{} search -f {} --threads {} -k {} {} > {}".format(
+        sassy_loc, primer_fasta, threads, max([max_indel, max_mismatch]),  database, sassy_output))
+    subprocess.Popen("{} search -f {} --threads {} -k {} {} > {}".format(
+        sassy_loc, primer_fasta, threads, max([max_indel, max_mismatch]),  database, sassy_output), shell=True).wait()
     outlist = []
-    reference_count = set()
-    with open(database) as f:
+    with open(sassy_output) as f:
+        f.readline()
         for line in f:
-            if line.startswith(">"):
-                num += 1
-                subject_name = "Subject_{}".format(num)
-                subject_names[subject_name] = (line.split("|")[0][1:], "|".join(line.rstrip().split("|")[1:]))
-                if not line.rstrip()[1:] in primer_dict:
-                    reference_count.add(line.split("|")[0])
-            else:
-                subject_seqs[subject_name] += line.rstrip()
-    reference_count = len(reference_count)
-    trans_table = {"-":"-", "a":"t", "t":"a", "c":"g", "g":"c", "u":"a", "n":"n", "r":"n", "y":"n", "s":"n", "w":"n", "k":"n", "m":"n", "b":"n", "d":"n", "h":"n", "v":"n"}
-    for primer, primer_seq in primer_dict.items():
-        sys.stderr.write(primer + "\n" + primer_seq + "\n")
-        single_primer_file = os.path.join(working_dir, prefix + ".tmp.fa")
-        tmp_alignment = os.path.join(working_dir, prefix + '.tmp.aln')
-        with open(single_primer_file, "w") as o:
-            o.write(">{}\n{}".format(primer, primer_seq))
-        refs2process = list(subject_seqs)
-        while refs2process != []:
-            firstEntry = refs2process.pop(0)
-            refs2include = [firstEntry]
-            firstFasta = subject_names[firstEntry][0]
-            while refs2process != []:
-                if subject_names[refs2process[0]][0] == firstFasta:
-                    refs2include.append(refs2process.pop(0))
+            primer, ref, cost, strand, start, end, match_region, cigar = line.rstrip().split("\t")
+            ref, contig = ref.split("|")
+            match_region = match_region.lower()
+            cigar = parse_cigar(cigar)
+            mismatch_count = sum([x[0] for x in cigar if x[1] == "X"])
+            indel_count = sum([x[0] for x in cigar if x[1] in ["I", "D"]])
+            cigar.reverse()
+            for i in cigar:
+                if i[1] == "=":
+                    last_1 = False
                 else:
-                    break
-            with open(os.path.join(working_dir, prefix + '.tmp.ref.fa'), 'w') as o:
-                o.write(">{}\n{}\n".format(primer, primer_seq))
-                for i in refs2include:
-                    o.write(">{}\n{}\n".format(i, subject_seqs[i]))
-            print(firstFasta)
-            subprocess.Popen(
-                "{} -max_target_seqs 1000000 -gapextend 2 -penalty -1 -gapopen 0 -query {} -subject {} -outfmt 3 -task blastn-short > {}".format(
-                    blastn_loc, single_primer_file, database, tmp_alignment), shell=True).wait()
-            qdict, mutdict = {}, {}
-            # parse the alignment
-            with open(tmp_alignment) as f:
-                while not line.startswith("Query_"):
-                    line = f.readline()
-                # read the Query line
-                refseq = line.split()[2]
-                refstart = line.find(refseq)
-                refseq = refseq.lower()
-                refend = refstart + len(refseq)
-                actual_bases = 0
-                last3pos = set()
-                qdict = {}
-                sampledict = {}
-                for num, i in enumerate(refseq[::-1]):
-                    if i != '-':
-                        actual_bases += 1
-                    if actual_bases == 1:
-                        lastbase = len(refseq) - 1 - num
-                    elif actual_bases <= 3:
-                        last3pos.add(len(refseq) - 1 - num)
-                # read the alignment lines
-                for line in f:
-                    if line.rstrip() == "":
-                        break
-                    # only get the top hit for each contig
-                    lastseq = line.split()[0]
-                    thename = subject_names[lastseq]
-                    if "{}|{}".format(thename[0], thename[1]) in primer_dict:
-                        continue
-                    seq = line[refstart:refend].lower()
-                    start = int(line.split()[1])
-                    end = int(line.split()[3])
-                    if start < end:
-                        start = start - (len(seq) - len(seq.lstrip())) -1
-                        seq = list(seq)
-                        for num, rbase in enumerate(refseq):
-                            if seq[num] == " ":
-                                if start+num < 0 or start+num >= len(subject_seqs[lastseq]):
-                                    seq[num] = '-'
-                                elif subject_seqs[lastseq][start+num].lower() == refseq[num].lower():
-                                    seq[num] = '.'
-                                elif subject_seqs[lastseq][start+num].lower() == 't' and refseq[num].lower() == 'u':
-                                    seq[num] = '.'
-                                elif subject_seqs[lastseq][start + num].lower() == 'u' and refseq[num].lower() == 't':
-                                    seq[num] = '.'
-                                else:
-                                    seq[num] = subject_seqs[lastseq][start+num].lower()
-                    else:
-                        start = start + (len(seq) - len(seq.lstrip())) -1
-                        seq = list(seq)
-                        for num, rbase in enumerate(refseq):
-                            if seq[num] == " ":
-                                if start-num < 0 or start-num >= len(subject_seqs[lastseq]):
-                                    seq[num] = '-'
-                                elif subject_seqs[lastseq][start-num].lower() == trans_table[refseq[num].lower()]:
-                                    seq[num] = '.'
-                                else:
-                                    seq[num] = trans_table[subject_seqs[lastseq][start-num].lower()]
-                    seq = "".join(seq)
-                    if seq in qdict:
-                        qdict[seq] += 1
-                        sampledict[seq].append((thename[0], thename[1], start < end, start+1))
-                        continue
-                    else:
-                        sampledict[seq] = [(thename[0], thename[1], start < end, start+1)]
-                    insert, deletion, substitution = 0, 0, 0
-                    last3, last1 = False, False
-                    for num, (i, j) in enumerate(zip(refseq, seq)):
-                        if i == '-' and j == '-':
-                            pass
-                        elif i == "-" or i == " ":
-                            insert += 1
-                        elif j == '-' or j == " ":
-                            deletion += 1
-                        elif j != '.':
-                            substitution += 1
-                        if j != '.' and num == lastbase:
-                            last1 = True
-                        elif j != '.' and num in last3pos:
-                            last3 = True
-                    if deletion >= max_indel or substitution >= max_mismatch:
-                        continue
-                    qdict[seq] = 1
-                    mutdict[seq] = (substitution, insert, deletion, last3, last1)
-        seqlist = list(qdict)
-        seqlist.sort(key=lambda x: qdict[x], reverse=True)
-        for i in seqlist:
-            j = qdict[i]
-            substitution, insert, deletion, last3, last1 = mutdict[i]
-            if last1:
-                alert = "HIGH"
-            elif insert + deletion > 0:
-                alert = "HIGH"
-            elif last3:
-                alert = "MEDIUM"
-            elif substitution > 2:
-                alert = "MEDIUM"
-            else:
-                alert = "LOW"
-            for qq in sampledict[i]:
-                aa = ''
-                bb = ''
-                for a, b in zip (refseq, i):
-                    if a == b == "-":
-                        pass
-                    else:
-                        aa += a
-                        bb += b
-                outlist.append(list(map(str,
-                                    [qq[0], qq[1], primer, aa, bb, j, alert, substitution, insert, deletion,
-                                     last3, last1])))
+                    last_1 = True
+                if i[0] >= 3 and i[1] == "=":
+                    last_3 = False
+                else:
+                    last_3 = True
+            if mismatch_count <= max_mismatch and indel_count <= max_indel:
+                if last_1:
+                    alert = "HIGH"
+                elif indel_count >= 1:
+                    alert = "HIGH"
+                elif last_3:
+                    alert = "MEDIUM"
+                elif mismatch_count >= 2:
+                    alert = "MEDIUM"
+                else:
+                    alert = "LOW"
+                outlist.append([ref, contig, primer, primer_dict[primer], match_region, alert, str(mismatch_count), str(indel_count), str(last_3), str(last_1)])
+    return(outlist)
 
+
+def create_output(outlist, working_dir, prefix, reference_count):    
     stats_dict = defaultdict(lambda: defaultdict(lambda: "MISSING"))
     single = defaultdict(lambda: set())
     double = defaultdict(lambda: set())
     with open(os.path.join(working_dir, prefix +"_primer_cheq.tsv"), 'w') as report:
-        report.write("Reference\tContig\tPrimer\tPrimer_Seq\tAlignment\tCount\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
-        best_hit = {}
-        for i in outlist:
-            primer = "|".join(i[2].split("|")[:-1])
-            if primer not in primer_dict:
-                best_hit[primer] = i
-            else:
-                if i[6] == best_hit[primer][6]:
-                    if i[4].count(".") > best_hit[primer][4].count("."):
-                        best_hit[primer] = i
-                elif i[6] == "LOW" and best_hit[primer][6] == "MEDIUM":
-                    best_hit[primer] = i
-                elif i[6] == "LOW" and best_hit[primer][6] == "HIGH":
-                    best_hit[primer] = i
-                elif i[6] == "MEDIUM" and best_hit[primer][6] == "HIGH":
-                    best_hit[primer] = i
-        outlist = []
-        for i in best_hit:
-            outlist.append([i] + best_hit[i][1:])
-        
+        report.write("Reference\tContig\tPrimer\tPrimer_Seq\tMatch_Seq\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
         for i in outlist:
             ref = i[0]
             primer = i[2]
@@ -328,11 +173,34 @@ def blast_primers(database, primer_dict, working_dir, prefix, max_indel, max_mis
                                                                 len([x for x in stats_dict[i].values() if x == "HIGH"])))
 
 
+def get_primer_sequences(primer_fasta):
+    primer_dict = {}
+    with open(primer_fasta) as f:
+        for line in f:
+            if line.startswith(">"):
+                primer_name = line[1:].rstrip()
+                primer_dict[primer_name] = ""
+            else:
+                primer_seq = line.rstrip()
+                primer_dict[primer_name] += primer_seq
+    return(primer_dict)
 
+def get_primer_table(primer_table):
+    primer_dict = {}
+    with open(primer_table) as f:
+        for line in f:
+            if line.startswith("#") or line.startswith("Primer"):
+                continue
+            else:
+                primer_name = line.split("\t")[0]
+                primer_seq = line.split("\t")[1]
+                primer_dict[primer_name] = primer_seq
+    return(primer_dict)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--primers", help="FASTA file of primers to check.", required=True, metavar="primer.fasta")
+    parser.add_argument("-p", "--primers", help="FASTA file of primers to check.", metavar="primers.fasta")
+    parser.add_argument("-t", "--primer_table", help="Table of primers to check.", metavar="primers.tsv")
     parser.add_argument("-s", "--prefix", help="Prefix for output files in workign directory.", required=True, metavar="sample_name")
     parser.add_argument("-w", '--working_directory', help="Path for intermediate and output files.", required=True, metavar="working_dir")
     parser.add_argument("-v", "--ncbi_virus", action="append", help="Download a database of viral references from NCBI using a taxid.", metavar="10244")
@@ -347,8 +215,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-
-    primer_dict = get_primer_sequences(args.primers)
+    if args.primers is None and args.primer_table is None:
+        sys.stderr.write("You must provide a FASTA file or a table of primers to check.\n")
+        sys.exit(0)
+    elif args.primers is not None and args.primer_table is not None:
+        sys.stderr.write("You cannot provide both a FASTA file and a table of primers to check.\n")
+        sys.exit(0)
+    elif args.primers is not None:
+        primer_dict = get_primer_sequences(args.primers)
+    elif args.primer_table is not None:
+        primer_dict = get_primer_table(args.primer_table)
 
     if not os.path.exists(args.working_directory):
         os.makedirs(args.working_directory)
@@ -360,27 +236,29 @@ if __name__ == "__main__":
         sys.stderr.write("You must provide a database of references to check against.\n")
         sys.exit(0)
 
-    primer_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
-    with open(primer_file, 'w') as o:
+    fasta_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
+    with open(fasta_file, 'w') as o:
         pass
+    reference_count = 0
     if args.ncbi_virus:
         for i in args.ncbi_virus:
             fasta_file = download_virus(i, args.working_directory, args.prefix)
-            get_db_fasta(fasta_file, args.working_directory, args.prefix)
+            reference_count += get_db_fasta(fasta_file, args.working_directory, args.prefix)
     if args.ncbi_bacteria:
         for i in args.ncbi_bacteria:
             fasta_files = download_bac(i, args.working_directory, args.prefix)
-            get_db_fastas(fasta_files, args.working_directory, args.prefix)
+            reference_count += get_db_fastas(fasta_files, args.working_directory, args.prefix)
     if args.directory_db:
         for i in args.directory_db:
             fasta_files = get_db_folder(i)
-            get_db_fastas(fasta_files, args.working_directory, args.prefix)
+            reference_count += get_db_fastas(fasta_files, args.working_directory, args.prefix)
     if args.fasta_db:
         for i in args.fasta_db:
-            get_db_fasta(i, args.working_directory, args.prefix)
+            reference_count += get_db_fasta(i, args.working_directory, args.prefix)
     if args.glob_db:
         for i in args.glob_db:
             fasta_files = get_db_glob(i)
-            get_db_fastas(fasta_files, args.working_directory, args.prefix)
-
-blast_primers(primer_file, primer_dict, args.working_directory, args.prefix, args.max_indel, args.max_mismatch)
+            reference_count += get_db_fastas(fasta_files, args.working_directory, args.prefix)
+    database_fasta = os.path.join(args.working_directory, args.prefix + "_db.fasta")
+    outlist = align_primers(primer_dict, database_fasta, args.working_directory, args.prefix, args.max_indel, args.max_mismatch)
+    create_output(outlist, args.working_directory, args.prefix, reference_count)

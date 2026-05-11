@@ -111,6 +111,22 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
         for line in f:
             primer, ref, cost, strand, start, end, match_region, cigar = line.rstrip().split("\t")
             cigar = parse_cigar(cigar)
+            alignment = ""
+            pos = 0
+            for i in cigar:
+                if i[1] == "=":
+                    alignment += '.' * i[0]
+                    pos += i[0]
+                elif i[1] == "X":
+                    for num in range(i[0]):
+                        alignment += match_region[pos].lower()
+                        pos += 1
+                elif i[1] == "I":
+                    alignment += '-' * i[0]
+                elif i[1] == "D":
+                    for num in range(i[0]):
+                        alignment += match_region[pos].upper()
+                        pos += 1
             mismatch_count = sum([x[0] for x in cigar if x[1] == "X"])
             insertion_count = sum([x[0] for x in cigar if x[1] == "I"])
             deletion_count = sum([x[0] for x in cigar if x[1] == "D"])
@@ -136,7 +152,7 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
                     alert = "MEDIUM"
                 else:
                     alert = "LOW"
-                outlist.append([ref, contig, primer, primer_dict[primer], match_region, alert, 
+                outlist.append([ref, contig, start, strand, primer, primer_dict[primer], alignment, alert, 
                 str(mismatch_count), str(insertion_count), str(deletion_count), str(last_3), str(last_1)])
     return(outlist)
 
@@ -145,12 +161,17 @@ def create_output(outlist, working_dir, prefix, reference_count):
     stats_dict = defaultdict(lambda: defaultdict(lambda: "MISSING"))
     single = defaultdict(lambda: set())
     double = defaultdict(lambda: set())
+    alignment_dict = defaultdict(lambda: defaultdict(lambda: [0, [], None]))
     with open(os.path.join(working_dir, prefix +"_primer_cheq.tsv"), 'w') as report:
-        report.write("Reference\tContig\tPrimer\tPrimer_Seq\tMatched_Seq\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
+        report.write("Reference\tContig\tPosition\tstrand\tPrimer\tPrimer_Seq\tMatched_Seq\tAlert\tSubstitution\tInsertion\tDeletion\tLast_3\tLast_1\n")
         for i in outlist:
             ref = i[0]
-            primer = i[2]
-            alert = i[5]
+            primer = i[4]
+            alignment = i[6]
+            alert = i[7]
+            alignment_dict[primer][alignment][0] += 1
+            alignment_dict[primer][alignment][1].append(ref)
+            alignment_dict[primer][alignment][2] = alert
             if ref in single[primer]:
                 double[primer].add(ref)
             else:
@@ -162,6 +183,14 @@ def create_output(outlist, working_dir, prefix, reference_count):
             elif alert == "HIGH" and stats_dict[primer][ref] != "LOW" and stats_dict[primer][ref] != "MEDIUM":
                 stats_dict[primer][ref] = "HIGH"
             report.write("\t".join(i) + "\n")
+    with open(os.path.join(working_dir, prefix + "_alignment_summary.tsv"), 'w') as alignment_summary:
+        alignment_summary.write("Primer\tMatched_Seq\tCount\tAlert\tReferences\n")
+        for primer in alignment_dict:
+            for alignment in alignment_dict[primer]:
+                count = alignment_dict[primer][alignment][0]
+                alert = alignment_dict[primer][alignment][2]
+                refs = ",".join(alignment_dict[primer][alignment][1])
+                alignment_summary.write("{}\t{}\t{}\t{}\t{}\n".format(primer, alignment, count, alert, refs))
     with open(os.path.join(working_dir, prefix + "_summary.tsv"), 'w') as summary:
         summary.write("Primer\tSingle_target\tMultiple_target\tMissing\tLow\tMedium\tHigh\n")
         for i in stats_dict:
@@ -182,19 +211,91 @@ def get_primer_sequences(primer_fasta):
             else:
                 primer_seq = line.rstrip()
                 primer_dict[primer_name] += primer_seq
-    return(primer_dict)
+    return primer_dict
 
 def get_primer_table(primer_table):
     primer_dict = {}
+    primer_info = {}
     with open(primer_table) as f:
         for line in f:
             if line.startswith("#") or line.startswith("Primer"):
                 continue
             else:
-                primer_name = line.split("\t")[0]
-                primer_seq = line.split("\t")[1]
+                if line.count("\t") == 4:
+                    primer_name, primer_set, primer_type, primer_seq, expected_product_size = line.rstrip("\n").split("\t")
+                    comments = ""
+                elif line.count("\t") == 5:
+                    primer_name, primer_set, primer_type, primer_seq, expected_product_size, comments = line.rstrip("\n").split("\t")
+                else:
+                    sys.stderr.write("Your primer table is not formatted correctly, please check the documentation for formatting instructions.\n")
+                    sys.exit(0)
                 primer_dict[primer_name] = primer_seq
-    return(primer_dict)
+                primer_info[primer_name] = (primer_set, primer_type, expected_product_size, comments)
+    return primer_dict, primer_info
+
+
+def create_product_size_output(align_list, primer_info, working_dir, prefix, primer_dict, max_primer_dist):
+    binding_sites = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: [])))
+    for i in align_list:
+        ref = i[0]
+        contig = i[1]
+        pos = int(i[2])
+        strand = i[3]
+        primer = i[4]
+        alert = i[7]
+        primerset = primer_info[primer][0]
+        binding_sites[primerset][ref][contig].append((pos, strand, primer, alert))
+    outlist = []
+    for primerset in binding_sites:
+        for ref in binding_sites[primerset]:
+            for contig in binding_sites[primerset][ref]:
+                bs = binding_sites[primerset][ref][contig]
+                bs.sort()
+                primer_strand = []
+                templist = []
+                for i in bs:
+                    pos, strand, primer, alert = i
+                    primer_type = primer_info[primer][1]
+                    expected_product_size = int(primer_info[primer][2])
+                    if strand == "+" and primer_type == "F":
+                        primer_strand = [(primer, primer_type, strand, pos, alert)]
+                    elif strand == '+' and primer_type == "R":
+                         primer_strand = [(primer, primer_type, strand, pos, alert)]
+                    elif strand == "-" and primer_type == "R" and primer_strand != [] and primer_strand[0][1] == "F" \
+                      and primer_strand[0][2] == "+" and pos - primer_strand[-1][3] <= max_primer_dist:
+                        primer_strand.append((primer, primer_type, strand, pos, alert))
+                        templist.append(primer_strand)
+                        primer_strand = []
+                    elif strand == "-" and primer_type == "F" and primer_strand != [] and primer_strand[0][1] == "R" \
+                      and primer_strand[0][2] == "-" and pos - primer_strand[-1][3] <= max_primer_dist:
+                        primer_strand.append((primer, primer_type, strand, pos, alert))
+                        templist.append(primer_strand)
+                        primer_strand = []
+                    elif primer_type == "P" and primer_strand != [] and pos - primer_strand[-1][3] <= max_primer_dist:
+                        primer_strand.append((primer, primer_type, strand, pos, alert))
+                    else:
+                        primer_strand = []
+                for i in templist:
+                    temp = []
+                    maxalert = "LOW"
+                    for j in i:
+                        temp.append(":".join(map(str, j)))
+                        if j[4] == "HIGH":
+                            maxalert = "HIGH"
+                        elif j[4] == "MEDIUM" and maxalert != "HIGH":
+                            maxalert = "MEDIUM"                    
+                    start = i[0][3]
+                    size = abs(i[0][3] - i[-1][3]) + len(primer_dict[i[0][0]])
+                    if size < expected_product_size * 0.8 or size > expected_product_size * 1.2:
+                        product_size_alert = "YES"
+                    else:
+                        product_size_alert = "NO"
+                    strandstr = ";".join(temp)
+                    outlist.append((primerset, maxalert, size, expected_product_size, product_size_alert, ref, contig, start, strandstr))
+    with open(os.path.join(working_dir, prefix + "_product_size.tsv"), 'w') as product_size_report:
+        product_size_report.write("Primer_Set\tMax_Alert\tProduct_Size\tExpected_Product_Size\tproudct_size_alert\tReference\tContig\tStart\tStrand_Info\n")
+        for i in outlist:
+            product_size_report.write("\t".join(map(str, i)) + "\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -209,8 +310,8 @@ if __name__ == "__main__":
     parser.add_argument("-g", "--glob_db", action="append", help="A glob used to identify FASTA files, each FASTA will be treated as its own reference.")
     parser.add_argument("-i", "--max_indel", type=int, default=2, help="Maximum indels allowed in reported hits.")
     parser.add_argument("-m", "--max_mismatch", type=int, default=5, help="Maximum mismatches allowed in reported hits.")
-
-
+    parser.add_argument("--sassy_loc", default="sassy", help="Path to sassy binary if not in PATH.")
+    parser.add_argument("-P", "--max_primer_dist", type=int, default=1500, help="Maximum distance between primers or primer and probe to produce a product.")
 
     args = parser.parse_args()
 
@@ -223,7 +324,7 @@ if __name__ == "__main__":
     elif args.primers is not None:
         primer_dict = get_primer_sequences(args.primers)
     elif args.primer_table is not None:
-        primer_dict = get_primer_table(args.primer_table)
+        primer_dict, primer_info = get_primer_table(args.primer_table)
 
     if not os.path.exists(args.working_directory):
         os.makedirs(args.working_directory)
@@ -261,3 +362,5 @@ if __name__ == "__main__":
     database_fasta = os.path.join(args.working_directory, args.prefix + "_db.fasta")
     outlist = align_primers(primer_dict, database_fasta, args.working_directory, args.prefix, args.max_indel, args.max_mismatch)
     create_output(outlist, args.working_directory, args.prefix, reference_count)
+    if not args.primer_table is None:
+        create_product_size_output(outlist, primer_info, args.working_directory, args.prefix, primer_dict, args.max_primer_dist)

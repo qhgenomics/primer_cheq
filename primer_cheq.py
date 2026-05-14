@@ -59,7 +59,7 @@ def get_db_glob(theglob):
     return(fasta_files)
 
 
-def get_db_fastas(fasta_list, working_dir, prefix):
+def get_db_fastas(fasta_list, working_dir, prefix, amb_bases):
     reference_count = 0
     with open(os.path.join(working_dir, "{}_db.fasta".format(prefix)), 'a') as o:
         for fasta in fasta_list:
@@ -68,25 +68,38 @@ def get_db_fastas(fasta_list, working_dir, prefix):
             filename.replace("|", "_")
             reference_count += 1
             with open(fasta) as f:
+                seq = None
                 for line in f:
                     if line.startswith(">"):
                         contig_name = line.split()[0][1:]
                         contig_name.replace("|", "_")
                         o.write(">{}|{}\n".format(filename, contig_name))
+                        if not seq is None:
+                            amb_bases[filename] = amb_bases[filename].union(set([i for i, char in enumerate(seq) if char == 'n']))
+                        seq = ''
                     else:
                         o.write(line.lower())
-    return(reference_count)
+                        seq += line.lower().rstrip()
+                amb_bases[filename] = amb_bases[filename].union(set([i for i, char in enumerate(seq) if char == 'n']))
+    return amb_bases
 
-def get_db_fasta(fasta_file, working_dir, prefix):
+def get_db_fasta(fasta_file, working_dir, prefix, amb_bases):
     reference_count = 0
     with open(os.path.join(working_dir, "{}_db.fasta".format(prefix)), 'a') as o, open(fasta_file) as f:
+        seq = None
         for line in f:
             if line.startswith(">"):
                 o.write(line.split()[0] + "|na\n")
                 reference_count += 1
+                if not seq is None:
+                    amb_bases[refname] = set([i for i, char in enumerate(seq) if char == 'n'])
+                refname = line.split()[0][1:]
+                seq = ''
             else:
                 o.write(line.lower())
-    return(reference_count)
+                seq += line.lower().rstrip()
+        amb_bases[refname] = set([i for i, char in enumerate(seq) if char == 'n'])
+    return amb_bases
 
 
 def parse_cigar(cigar_str):
@@ -106,6 +119,7 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
     subprocess.Popen("{} search -f {} --threads {} -k {} {} > {}".format(
         sassy_loc, primer_fasta, threads, max([max_indel, max_mismatch]),  database, sassy_output), shell=True).wait()
     outlist = []
+    start_locations = defaultdict(lambda: defaultdict(lambda: 0))
     with open(sassy_output) as f:
         f.readline()
         for line in f:
@@ -154,10 +168,13 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel=2, max_m
                     alert = "LOW"
                 outlist.append([ref, contig, start, strand, primer, primer_dict[primer], alignment, alert, 
                 str(mismatch_count), str(insertion_count), str(deletion_count), str(last_3), str(last_1)])
-    return(outlist)
+                start_locations[primer][int(start)] += 1
+    return outlist, start_locations
 
+def predict_missing_in_ref(primer_seq, amb_bases, predict_missing_in_ref_threshold):
+    pass
 
-def create_output(outlist, working_dir, prefix, reference_count):    
+def create_output(outlist, working_dir, prefix, reference_count, amb_references):    
     stats_dict = defaultdict(lambda: defaultdict(lambda: "MISSING"))
     single = defaultdict(lambda: set())
     double = defaultdict(lambda: set())
@@ -172,6 +189,8 @@ def create_output(outlist, working_dir, prefix, reference_count):
             alignment_dict[primer][alignment][0] += 1
             alignment_dict[primer][alignment][1].append(ref)
             alignment_dict[primer][alignment][2] = alert
+            if ref in amb_references[primer]:
+                amb_references[primer].remove(ref)
             if ref in single[primer]:
                 double[primer].add(ref)
             else:
@@ -192,10 +211,12 @@ def create_output(outlist, working_dir, prefix, reference_count):
                 refs = ",".join(alignment_dict[primer][alignment][1])
                 alignment_summary.write("{}\t{}\t{}\t{}\t{}\n".format(primer, alignment, count, alert, refs))
     with open(os.path.join(working_dir, prefix + "_summary.tsv"), 'w') as summary:
-        summary.write("Primer\tSingle_target\tMultiple_target\tMissing\tLow\tMedium\tHigh\n")
+        summary.write("Primer\tSingle_target\tMultiple_target\tMissing\tamb_in_ref\tLow\tMedium\tHigh\n")
         for i in stats_dict:
+            print(i, len(amb_references[i]), len(single[i]), len(double[i]), reference_count)
             summary.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(i, len(single[i]) - len(double[i]), len(double[i]),
-                                                                reference_count - len(single[i]),
+                                                                reference_count - len(single[i]) - len(amb_references[i]),
+                                                                len(amb_references[i]),
                                                                 len([x for x in stats_dict[i].values() if x == "LOW"]),
                                                                 len([x for x in stats_dict[i].values() if x == "MEDIUM"]),
                                                                 len([x for x in stats_dict[i].values() if x == "HIGH"])))
@@ -297,6 +318,22 @@ def create_product_size_output(align_list, primer_info, working_dir, prefix, pri
         for i in outlist:
             product_size_report.write("\t".join(map(str, i)) + "\n")
 
+def get_amb_in_ref(primer_dict, amb_bases, start_locations, fractions_threshold=0.05):
+    amb_refs = {}
+    for primer in primer_dict:
+        amb_refs[primer] = set()
+        total_starts = sum(start_locations.get(primer, {}).values())
+        for start in start_locations[primer]:
+            if start_locations[primer][start] / total_starts >= fractions_threshold:
+                start_bases = set(range(start, start + len(primer_dict[primer])))
+                for i in amb_bases:
+                    if len(start_bases.intersection(amb_bases[i])) > 3:
+                        amb_refs[primer].add(i)
+                        print(primer, i, start_bases.intersection(amb_bases[i]))
+    return amb_refs
+
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--primers", help="FASTA file of primers to check.", metavar="primers.fasta")
@@ -312,6 +349,7 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--max_mismatch", type=int, default=5, help="Maximum mismatches allowed in reported hits.")
     parser.add_argument("--sassy_loc", default="sassy", help="Path to sassy binary if not in PATH.")
     parser.add_argument("-P", "--max_primer_dist", type=int, default=1500, help="Maximum distance between primers or primer and probe to produce a product.")
+    parser.add_argument("--predict_amb_in_ref", default=0.05, type=float, help="Predict whether primer site is missing in reference due to ambiguous bases.")
 
     args = parser.parse_args()
 
@@ -339,28 +377,31 @@ if __name__ == "__main__":
     fasta_file = os.path.join(args.working_directory, args.prefix + "_db.fasta")
     with open(fasta_file, 'w') as o:
         pass
+    amb_bases = defaultdict(lambda:set())
     reference_count = 0
     if args.ncbi_virus:
         for i in args.ncbi_virus:
             fasta_file = download_virus(i, args.working_directory, args.prefix)
-            reference_count += get_db_fasta(fasta_file, args.working_directory, args.prefix)
+            amb_bases = get_db_fasta(fasta_file, args.working_directory, args.prefix, amb_bases)
     if args.ncbi_bacteria:
         for i in args.ncbi_bacteria:
             fasta_files = download_bac(i, args.working_directory, args.prefix)
-            reference_count += get_db_fastas(fasta_files, args.working_directory, args.prefix)
+            amb_bases = get_db_fastas(fasta_files, args.working_directory, args.prefix, amb_bases)
     if args.directory_db:
         for i in args.directory_db:
             fasta_files = get_db_folder(i)
-            reference_count += get_db_fastas(fasta_files, args.working_directory, args.prefix)
+            amb_bases = get_db_fastas(fasta_files, args.working_directory, args.prefix, amb_bases)
     if args.fasta_db:
         for i in args.fasta_db:
-            reference_count += get_db_fasta(i, args.working_directory, args.prefix)
+            amb_bases = get_db_fasta(i, args.working_directory, args.prefix, amb_bases)
     if args.glob_db:
         for i in args.glob_db:
             fasta_files = get_db_glob(i)
-            reference_count += get_db_fastas(fasta_files, args.working_directory, args.prefix)
+            amb_bases = get_db_fastas(fasta_files, args.working_directory, args.prefix, amb_bases)
+    reference_count = len(amb_bases)
     database_fasta = os.path.join(args.working_directory, args.prefix + "_db.fasta")
-    outlist = align_primers(primer_dict, database_fasta, args.working_directory, args.prefix, args.max_indel, args.max_mismatch)
-    create_output(outlist, args.working_directory, args.prefix, reference_count)
+    outlist, start_locations = align_primers(primer_dict, database_fasta, args.working_directory, args.prefix, args.max_indel, args.max_mismatch)
+    amb_references = get_amb_in_ref(primer_dict, amb_bases, start_locations, args.predict_amb_in_ref)
+    create_output(outlist, args.working_directory, args.prefix, reference_count, amb_references)
     if not args.primer_table is None:
         create_product_size_output(outlist, primer_info, args.working_directory, args.prefix, primer_dict, args.max_primer_dist)

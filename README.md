@@ -9,7 +9,7 @@ Tool for checking primer coverage and drift.
 ## Requirements
 
 - Python 3.x
-- BLAST+ (installed and available in the system PATH)
+- [Sassy](https://github.com/RagnarGrootKoerkamp/sassy)  (installed and available in the system PATH)
 - NCBI Datasets command-line tool (installed and available in the system PATH)
 - unzip bash tool (installed and available in the system PATH)
 

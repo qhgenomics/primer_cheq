@@ -12,7 +12,7 @@ import re
 
 # downloads viruses into a single file
 def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets", batchnum=5000):
-    metadata = subprocess.check_output("datasets summary virus genome taxon {} | jq | jq '.reports[] | \"(.accession) (.isolate.collection_date)\"'".format(taxnum), shell=True).decode()
+    metadata = subprocess.check_output("{} summary virus genome taxon {} | jq | jq '.reports[] | \"\(.accession) \(.isolate.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
     accession_list = []
     fasta_files = []
     for line in metadata.split("\n"):
@@ -26,7 +26,7 @@ def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets",
             f.write('\n'.join(accession_list[num:num+batchnum]))
         datasets_filename = os.path.join(working_dir, "{}_ncbi_dataset_{}.zip".format(prefix, num//batchnum))
         subprocess.Popen("{} download virus genome accession --inputfile {} --complete-only --filename {}".format(
-            datasets, accession_filename
+            datasets, accession_filename, datasets_filename
         ), shell=True).wait()
         datasets_unzip_folder = os.path.join(working_dir,  "{}_downloads_{}".format(prefix, num//batchnum))
         subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
@@ -41,16 +41,30 @@ def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets",
 
 
 # downloads bacteria into multiple files
-def download_bac(taxnum, working_dir, prefix, datasets="datasets"):
-    datasets_filename = os.path.join(working_dir, prefix + "_ncbi_dataset.zip")
-    subprocess.Popen("{} download genome taxon {} --assembly-source RefSeq --filename {}".format(
-        datasets, taxnum, datasets_filename
-    ), shell=True).wait()
-    datasets_unzip_folder = os.path.join(working_dir, prefix + "_downloads")
-    subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
-        f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder
-    ), shell=True).wait()
-    fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset", "*", "*.fna"))
+def download_bac(taxnum, working_dir, prefix, date="all", datasets="datasets", batchnum=5000):
+    metadata = subprocess.check_output("{} summary genome taxon {} | jq | jq '.reports[] | \"\(.accession) \(.assembly_info.biosample.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
+    accession_list = []
+    fasta_files = []
+    for line in metadata.split("\n"):
+        if line != "":
+            accession, collection_date = line.strip('"').split()
+            if date == "all" or collection_date.startswith(date):
+                accession_list.append(accession)
+    for num in range(0, len(accession_list), batchnum):
+        accession_filename = os.path.join(working_dir, "{}_accessions_{}.txt".format(prefix, num//batchnum))
+        with open(accession_filename, 'w') as f:
+            f.write('\n'.join(accession_list[num:num+batchnum]))
+        datasets_filename = os.path.join(working_dir, "{}_ncbi_dataset_{}.zip".format(prefix, num//batchnum))
+        print( "{} download genome accession --inputfile {} --complete-only --filename {}".format(
+            datasets, accession_filename, datasets_filename))
+        subprocess.Popen("{} download genome accession --inputfile {} --filename {}".format(
+            datasets, accession_filename, datasets_filename
+        ), shell=True).wait()
+        datasets_unzip_folder = os.path.join(working_dir,  "{}_downloads_{}".format(prefix, num//batchnum))
+        subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
+            f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder), shell=True).wait()
+        new_fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data", "*", "*.fna"))
+        fasta_files += new_fasta_files
     if len(fasta_files) < 1:
         sys.stderr.write("Something went wrong downloading using datasets, please check above for error messages.\n")
         sys.exit(0)
@@ -228,7 +242,7 @@ def create_output(outlist, working_dir, prefix, reference_count, amb_references)
     with open(os.path.join(working_dir, prefix + "_summary.tsv"), 'w') as summary:
         summary.write("Primer\tSingle_target\tMultiple_target\tMissing\tamb_in_ref\tLow\tMedium\tHigh\n")
         for i in stats_dict:
-            summary.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(i, len(single[i]) - len(double[i]), len(double[i]),
+            summary.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(i, len(single[i]) - len(double[i]), len(double[i]),
                                                                 reference_count - len(single[i]) - len(amb_references[i]),
                                                                 len(amb_references[i]),
                                                                 len([x for x in stats_dict[i].values() if x == "LOW"]),

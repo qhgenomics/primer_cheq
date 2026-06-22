@@ -42,7 +42,7 @@ def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets",
 
 # downloads bacteria into multiple files
 def download_bac(taxnum, working_dir, prefix, date="all", datasets="datasets", batchnum=5000):
-    metadata = subprocess.check_output("{} summary genome taxon {} | jq | jq '.reports[] | \"\(.accession) \(.assembly_info.biosample.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
+    metadata = subprocess.check_output("{} summary genome taxon {} | jq | jq '.reports[] | \"\\(.accession) \\(.assembly_info.biosample.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
     accession_list = []
     fasta_files = []
     for line in metadata.split("\n"):
@@ -55,8 +55,6 @@ def download_bac(taxnum, working_dir, prefix, date="all", datasets="datasets", b
         with open(accession_filename, 'w') as f:
             f.write('\n'.join(accession_list[num:num+batchnum]))
         datasets_filename = os.path.join(working_dir, "{}_ncbi_dataset_{}.zip".format(prefix, num//batchnum))
-        print( "{} download genome accession --inputfile {} --complete-only --filename {}".format(
-            datasets, accession_filename, datasets_filename))
         subprocess.Popen("{} download genome accession --inputfile {} --filename {}".format(
             datasets, accession_filename, datasets_filename
         ), shell=True).wait()

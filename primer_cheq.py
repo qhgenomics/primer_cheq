@@ -12,7 +12,7 @@ import re
 
 # downloads viruses into a single file
 def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets", batchnum=5000):
-    metadata = subprocess.check_output("{} summary virus genome taxon {} | jq | jq '.reports[] | \"\(.accession) \(.isolate.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
+    metadata = subprocess.check_output("{} summary virus genome taxon {} | jq | jq '.reports[] | \"\\(.accession) \\(.isolate.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
     accession_list = []
     fasta_files = []
     for line in metadata.split("\n"):

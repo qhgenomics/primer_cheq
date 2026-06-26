@@ -151,7 +151,7 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel, max_mis
     with open(sassy_output) as f:
         f.readline()
         for line in f:
-            primer, ref, cost, strand, start, end, match_region, cigar = line.rstrip().split("\t")
+            primer, ref_temp, cost, strand, start, end, match_region, cigar = line.rstrip().split("\t")
             cigar = parse_cigar(cigar)
             alignment = ""
             pos = 0
@@ -174,7 +174,8 @@ def align_primers(primer_dict, database, working_dir, prefix, max_indel, max_mis
             deletion_count = sum([x[0] for x in cigar if x[1] == "D"])
             indel_count = insertion_count + deletion_count
             if mismatch_count + indel_count * indel_mult <= max_mismatch and indel_count <= max_indel:
-                ref, contig = ref.split("|")
+                ref = "|".join(ref_temp.split("|")[:-1])
+                contig = ref_temp.split("|")[-1]
                 match_region = match_region.lower()
                 if cigar[-1][1] == "=":
                     last_1 = False

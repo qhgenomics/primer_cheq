@@ -1,15 +1,19 @@
-import sys, os
+import sys, os, shutil
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QCheckBox, QGridLayout, QMessageBox
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 import subprocess
-from primer_cheq import get_primer_sequences, get_primer_table, get_db_glob, get_db_fasta, get_db_fastas, get_db_folder, download_bac, download_virus, align_primers
+from primer_cheq import get_primer_sequences, get_primer_table, get_db_glob, get_db_fasta, get_db_fastas, get_db_folder, download_bac, download_virus, align_primers, get_amb_in_ref, create_product_size_output, create_xls, create_output
+
+
+
+
 
 class BlastWorker(QThread):
     finished = pyqtSignal()
 
-    def __init__(self, primer_file, primer_dict, primer_info, working_directory, prefix, sassy_loc, max_indel, max_mismatch, indel_mult, threads, max_primer_dist):
+    def __init__(self, database_fasta, primer_dict, primer_info, working_directory, prefix, sassy_loc, max_indel, max_mismatch, indel_mult, threads, max_primer_dist, only_product_forming, amb_bases, predict_amb_in_ref, xlsx):
         super().__init__()
-        self.primer_file = primer_file
+        self.database_fasta = database_fasta
         self.primer_dict = primer_dict
         self.primer_info = primer_info
         self.working_directory = working_directory
@@ -20,9 +24,22 @@ class BlastWorker(QThread):
         self.indel_mult = indel_mult
         self.threads = threads
         self.max_primer_dist = max_primer_dist
+        self.only_product_forming = only_product_forming
+        self.amb_bases = amb_bases
+        self.predict_amb_in_ref = predict_amb_in_ref
+        self.xlsx = xlsx
+        self.reference_count = len(amb_bases)
 
     def run(self):
-        align_primers(self.primer_dict, self.primer_file, self.working_directory, self.prefix, self.max_indel, self.max_mismatch, self.indel_mult, self.threads, self.sassy_loc)
+        outlist, start_locations = align_primers(self.primer_dict, self.database_fasta, self.working_directory, self.prefix, self.max_indel, self.max_mismatch, self.indel_mult, self.threads, self.sassy_loc)
+        if not self.primer_info is None:
+            filtered_list = create_product_size_output(outlist, self.primer_info, self.working_directory, self.prefix, self.primer_dict, self.max_primer_dist, reference_count)
+            if self.only_product_forming:
+                outlist = filtered_list
+        amb_references = get_amb_in_ref(self.primer_dict, self.amb_bases, start_locations, self.predict_amb_in_ref)
+        create_output(outlist, self.working_directory, self.prefix, self.reference_count, amb_references)
+        if not self.xlsx is None:
+            create_xls(self.working_directory, self.prefix, self.xlsx)
         self.finished.emit()
 
 class PrimerCheqGUI(QWidget):
@@ -43,7 +60,7 @@ class PrimerCheqGUI(QWidget):
         layout.addWidget(self.primer_label, 1, 0)
         layout.addWidget(self.primer_input, 1, 1, 1, 2)
         layout.addWidget(self.primer_button, 1, 3)
-        
+       
         # Primer table
         self.primer_table_label = QLabel('Primer table file (TSV):')
         self.primer_table_input = QLineEdit(self)
@@ -54,7 +71,15 @@ class PrimerCheqGUI(QWidget):
         layout.addWidget(self.primer_table_button, 2, 3)
 
         self.sassy_label = QLabel('Sassy location:')
-        self.sassy_input = QLineEdit('sassy', self)
+        if shutil.which("sassy"):
+            sassy_loc = "sassy"
+        elif os.path.exists(os.path.join(".", "sassy")):
+            sassy_loc = os.path.join(".", "sassy")
+        elif os.path.exists(os.path.join(".", "sassy.exe")):
+            sassy_loc = os.path.join(".", "sassy.exe")
+        else:
+            sassy_loc = ""
+        self.sassy_input = QLineEdit(sassy_loc, self)
         self.sassy_button = QPushButton('Browse', self)
         self.sassy_button.clicked.connect(self.browse_sassy)
         layout.addWidget(self.sassy_label, 3, 0)
@@ -132,48 +157,66 @@ class PrimerCheqGUI(QWidget):
         self.max_indel_label = QLabel('Max indels:')
         self.max_indel_input = QLineEdit('2', self)
         layout.addWidget(self.max_indel_label, 15, 0)
-        layout.addWidget(self.max_indel_input, 15, 1)
+        layout.addWidget(self.max_indel_input, 15, 1, 1, 3)
 
         # Max mismatch
         self.max_mismatch_label = QLabel('Max mismatches:')
         self.max_mismatch_input = QLineEdit('4', self)
-        layout.addWidget(self.max_mismatch_label, 15, 2)
-        layout.addWidget(self.max_mismatch_input, 15, 3)
+        layout.addWidget(self.max_mismatch_label, 16, 0)
+        layout.addWidget(self.max_mismatch_input, 16, 1, 1, 3)
 
         # Indel multiplier
         self.indel_mult_label = QLabel('Indel multiplier:')
         self.indel_mult_input = QLineEdit('2', self)
-        layout.addWidget(self.indel_mult_label, 16, 0)
-        layout.addWidget(self.indel_mult_input, 16, 1)
+        layout.addWidget(self.indel_mult_label, 17, 0)
+        layout.addWidget(self.indel_mult_input, 17, 1, 1, 3)
 
         # Threads
         self.threads_label = QLabel('Threads:')
         self.threads_input = QLineEdit('1', self)
-        layout.addWidget(self.threads_label, 16, 2)
-        layout.addWidget(self.threads_input, 16, 3)
+        layout.addWidget(self.threads_label, 18, 0)
+        layout.addWidget(self.threads_input, 18, 1, 1, 3)
 
         # Max primer distance
         self.max_primer_dist_label = QLabel('Max primer distance:')
         self.max_primer_dist_input = QLineEdit('5000', self)
-        layout.addWidget(self.max_primer_dist_label, 17, 0)
-        layout.addWidget(self.max_primer_dist_input, 17, 1)
+        layout.addWidget(self.max_primer_dist_label, 19, 0)
+        layout.addWidget(self.max_primer_dist_input, 19, 1, 1, 3)
 
         # Dataset location
         self.dataset_loc_label = QLabel('Dataset location:')
-        self.dataset_loc_input = QLineEdit('datasets', self)
+        if shutil.which("datasets"):
+            datasets_loc = "datasets"
+        elif os.path.exists(os.path.join(".", "datasets")):
+            datasets_loc = os.path.join(".", "datasets")
+        elif os.path.exists(os.path.join(".", "datasets.exe")):
+            datasets_loc = os.path.join(".", "datasets.exe")
+        else:
+            datasets_loc = ""
+        self.dataset_loc_input = QLineEdit(datasets_loc, self)
         self.dataset_loc_button = QPushButton('Browse', self)
         self.dataset_loc_button.clicked.connect(self.browse_dataset_loc)
-        layout.addWidget(self.dataset_loc_label, 17, 2)
-        layout.addWidget(self.dataset_loc_input, 17, 3)
+        layout.addWidget(self.dataset_loc_label, 20, 0)
+        layout.addWidget(self.dataset_loc_input, 20, 1, 1, 2)
+        layout.addWidget(self.dataset_loc_button, 20, 3)
 
         # Only product forming
         self.only_product_forming_checkbox = QCheckBox('Only report product-forming primers', self)
-        layout.addWidget(self.only_product_forming_checkbox, 18, 0, 1, 4)
+        layout.addWidget(self.only_product_forming_checkbox, 21, 0, 1, 1)
+        self.predict_amb_in_ref = QCheckBox('Predict ambiguous bases in reference', self)
+        layout.addWidget(self.predict_amb_in_ref, 21, 1, 1, 2)
+        self.create_xls_label = QLabel('Excel output:')
+        self.create_xls_input = QLineEdit('', self)
+        self.create_xls_button = QPushButton('Browse', self)
+        self.create_xls_button.clicked.connect(self.browse_xls_output)  
+        layout.addWidget(self.create_xls_label, 22, 0)  
+        layout.addWidget(self.create_xls_input, 22, 1, 1, 2)
+        layout.addWidget(self.create_xls_button, 22, 3)
 
         # Run button
         self.run_button = QPushButton('Run', self)
         self.run_button.clicked.connect(self.run_script)
-        layout.addWidget(self.run_button, 19, 0, 1, 4)
+        layout.addWidget(self.run_button, 23, 0, 1, 4)
 
         self.setLayout(layout)
         self.setWindowTitle('Primer Cheq GUI')
@@ -214,6 +257,11 @@ class PrimerCheqGUI(QWidget):
         if fname[0]:
             self.dataset_loc_input.setText(fname[0])
 
+    def browse_xls_output(self):
+        fname = QFileDialog.getSaveFileName(self, 'Save file', '', 'Excel files (*.xlsx)')
+        if fname[0]:
+            self.create_xls_input.setText(fname[0])
+
     def run_script(self):
         primers = self.primer_input.text().strip()
         primer_table = self.primer_table_input.text().strip()
@@ -233,7 +281,13 @@ class PrimerCheqGUI(QWidget):
         max_primer_dist = int(self.max_primer_dist_input.text().strip())
         dataset_loc = self.dataset_loc_input.text().strip()
         only_product_forming = self.only_product_forming_checkbox.isChecked()
-
+        predict_amb_in_ref = self.predict_amb_in_ref.isChecked()
+        create_xls = self.create_xls_input.text().strip()
+        if create_xls == "":
+            create_xls = None
+        if sassy_loc == "":
+            QMessageBox.critical(self, 'Error', 'You need to have sassy (https://github.com/RagnarGrootKoerkamp/sassy) in your path or the directory from which you ran this tool.')
+            return
         if not (primers or primer_table):
             QMessageBox.warning(self, 'Input Error', 'Please provide either a primer file or primer table.')
             return
@@ -250,7 +304,7 @@ class PrimerCheqGUI(QWidget):
         # Get primer information
         if primers:
             primer_dict = get_primer_sequences(primers)
-            primer_info = {}
+            primer_info = None
         else:
             primer_dict, primer_info = get_primer_table(primer_table)
 
@@ -263,15 +317,21 @@ class PrimerCheqGUI(QWidget):
         # Build database from all sources
         from collections import defaultdict
         amb_bases = defaultdict(set)
-        
-        primer_file = os.path.join(working_directory, prefix + "_db.fasta")
-        open(primer_file, 'w').close()
-        
+       
+        database_fasta = os.path.join(working_directory, prefix + "_db.fasta")
+        open(database_fasta, 'w').close()
+       
         if ncbi_virus:
+            if dataset_loc == "":
+                QMessageBox.critical(self, 'Error', 'You need to have the ncbi application datasets in your path or the directory from which you ran this tool.')
+                return
             fasta_files = download_virus(ncbi_virus, working_directory, prefix, date=year, datasets=dataset_loc)
             for fasta_file in fasta_files:
                 amb_bases = get_db_fasta(fasta_file, working_directory, prefix, amb_bases)
         if ncbi_bacteria:
+            if dataset_loc == "":
+                QMessageBox.critical(self, 'Error', 'You need to have the ncbi application datasets in your path or the directory from which you ran this tool.')
+                return
             fasta_files = download_bac(ncbi_bacteria, working_directory, prefix, datasets=dataset_loc)
             amb_bases = get_db_fastas(fasta_files, working_directory, prefix, amb_bases)
         if directory_db:
@@ -283,7 +343,8 @@ class PrimerCheqGUI(QWidget):
             fasta_files = get_db_glob(glob_db)
             amb_bases = get_db_fastas(fasta_files, working_directory, prefix, amb_bases)
 
-        self.worker = BlastWorker(primer_file, primer_dict, primer_info, working_directory, prefix, sassy_loc, max_indel, max_mismatch, indel_mult, threads, max_primer_dist)
+        self.worker = BlastWorker(database_fasta, primer_dict, primer_info, working_directory, prefix, sassy_loc, max_indel, max_mismatch, 
+                                  indel_mult, threads, max_primer_dist, only_product_forming, amb_bases, predict_amb_in_ref, create_xls)
         self.worker.finished.connect(self.on_blast_finished)
         self.worker.start()
 
@@ -309,4 +370,4 @@ class PrimerCheqGUI(QWidget):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ex = PrimerCheqGUI()
-    sys.exit(app.exec_())   
+    sys.exit(app.exec_())

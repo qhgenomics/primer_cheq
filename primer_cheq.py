@@ -9,17 +9,21 @@ import argparse
 import os
 from collections import defaultdict
 import re
+import json
+import zipfile
+
 
 # downloads viruses into a single file
 def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets", batchnum=5000):
-    metadata = subprocess.check_output("{} summary virus genome taxon {} | jq | jq '.reports[] | \"\\(.accession) \\(.isolate.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
+    metadata = subprocess.check_output("{} summary virus genome taxon {}".format(datasets, taxnum), shell=True).decode()
+    meta_json = json.loads(metadata)
     accession_list = []
     fasta_files = []
-    for line in metadata.split("\n"):
-        if line != "":
-            accession, collection_date = line.strip('"').split()
-            if date == "all" or collection_date.startswith(date):
-                accession_list.append(accession)
+    for report in meta_json.get("reports", []):
+        accession = report.get("accession")
+        collection_date = report.get("isolate", {}).get("collection_date", "")
+        if date == "all" or collection_date.startswith(date):
+            accession_list.append(accession)
     for num in range(0, len(accession_list), batchnum):
         accession_filename = os.path.join(working_dir, "{}_accessions_{}.txt".format(prefix, num//batchnum))
         with open(accession_filename, 'w') as f:
@@ -29,8 +33,9 @@ def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets",
             datasets, accession_filename, datasets_filename
         ), shell=True).wait()
         datasets_unzip_folder = os.path.join(working_dir,  "{}_downloads_{}".format(prefix, num//batchnum))
-        subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
-            f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder), shell=True).wait()
+        with zipfile.ZipFile(datasets_filename, 'r') as zip_ref:
+            zip_ref.extractall(datasets_unzip_folder)
+        os.remove(datasets_filename)
         fasta_file = os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data", "genomic.fna")
         fasta_files.append(fasta_file)
         if not os.path.exists(fasta_file):
@@ -42,14 +47,15 @@ def download_virus(taxnum, working_dir, prefix, date="all", datasets="datasets",
 
 # downloads bacteria into multiple files
 def download_bac(taxnum, working_dir, prefix, date="all", datasets="datasets", batchnum=5000):
-    metadata = subprocess.check_output("{} summary genome taxon {} | jq | jq '.reports[] | \"\\(.accession) \\(.assembly_info.biosample.collection_date)\"'".format(datasets, taxnum), shell=True).decode()
+    metadata = subprocess.check_output("{} summary genome taxon {}".format(datasets, taxnum), shell=True).decode()
     accession_list = []
     fasta_files = []
-    for line in metadata.split("\n"):
-        if line != "":
-            accession, collection_date = line.strip('"').split()
-            if date == "all" or collection_date.startswith(date):
-                accession_list.append(accession)
+    meta_json = json.loads(metadata)
+    for report in meta_json.get("reports", []):
+        accession = report.get("accession")
+        collection_date = report.get("assembly_info", {}).get("biosample", {}).get("collection_date", "")
+        if date == "all" or collection_date.startswith(date):
+            accession_list.append(accession)
     for num in range(0, len(accession_list), batchnum):
         accession_filename = os.path.join(working_dir, "{}_accessions_{}.txt".format(prefix, num//batchnum))
         with open(accession_filename, 'w') as f:
@@ -59,8 +65,9 @@ def download_bac(taxnum, working_dir, prefix, date="all", datasets="datasets", b
             datasets, accession_filename, datasets_filename
         ), shell=True).wait()
         datasets_unzip_folder = os.path.join(working_dir,  "{}_downloads_{}".format(prefix, num//batchnum))
-        subprocess.Popen("unzip -o {f_datasets_filename} -d {f_datasets_unzip_folder} && rm {f_datasets_filename}".format(
-            f_datasets_filename=datasets_filename, f_datasets_unzip_folder=datasets_unzip_folder), shell=True).wait()
+        with zipfile.ZipFile(datasets_filename, 'r') as zip_ref:
+            zip_ref.extractall(datasets_unzip_folder)
+        os.remove(datasets_filename)
         new_fasta_files = glob.glob(os.path.join(datasets_unzip_folder, "ncbi_dataset" , "data", "*", "*.fna"))
         fasta_files += new_fasta_files
     if len(fasta_files) < 1:

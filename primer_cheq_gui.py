@@ -33,7 +33,7 @@ class BlastWorker(QThread):
     def run(self):
         outlist, start_locations = align_primers(self.primer_dict, self.database_fasta, self.working_directory, self.prefix, self.max_indel, self.max_mismatch, self.indel_mult, self.threads, self.sassy_loc)
         if not self.primer_info is None:
-            filtered_list = create_product_size_output(outlist, self.primer_info, self.working_directory, self.prefix, self.primer_dict, self.max_primer_dist, reference_count)
+            filtered_list = create_product_size_output(outlist, self.primer_info, self.working_directory, self.prefix, self.primer_dict, self.max_primer_dist, self.reference_count)
             if self.only_product_forming:
                 outlist = filtered_list
         amb_references = get_amb_in_ref(self.primer_dict, self.amb_bases, start_locations, self.predict_amb_in_ref)
